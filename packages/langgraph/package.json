@@ -1,0 +1,76 @@
+{
+	"name": "@surrealdb/langgraph",
+	"version": "0.1.0",
+	"description": "SurrealDB checkpoint saver and store for LangGraph.js",
+	"type": "module",
+	"main": "dist/index.cjs",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": {
+				"types": "./dist/index.d.ts",
+				"default": "./dist/index.js"
+			},
+			"require": {
+				"types": "./dist/index.d.cts",
+				"default": "./dist/index.cjs"
+			}
+		},
+		"./checkpoint": {
+			"import": {
+				"types": "./dist/checkpoint.d.ts",
+				"default": "./dist/checkpoint.js"
+			},
+			"require": {
+				"types": "./dist/checkpoint.d.cts",
+				"default": "./dist/checkpoint.cjs"
+			}
+		},
+		"./store": {
+			"import": {
+				"types": "./dist/store.d.ts",
+				"default": "./dist/store.js"
+			},
+			"require": {
+				"types": "./dist/store.d.cts",
+				"default": "./dist/store.cjs"
+			}
+		},
+		"./package.json": "./package.json"
+	},
+	"license": "Apache-2.0",
+	"engines": {
+		"bun": ">=1.0.0",
+		"node": ">=22"
+	},
+	"dependencies": {
+		"@surrealdb/langchain-core": "workspace:*",
+		"surrealdb": "^2.0.3"
+	},
+	"peerDependencies": {
+		"@langchain/core": ">=0.3.0 <2.0.0",
+		"@langchain/langgraph-checkpoint": ">=0.0.20 <2.0.0"
+	},
+	"devDependencies": {
+		"@langchain/core": "^1.1.45",
+		"@langchain/langgraph": "^1.0.0",
+		"@langchain/langgraph-checkpoint": "^1.0.2",
+		"@types/node": "^22.0.0",
+		"tsup": "^8.5.1",
+		"typescript": "^5.9.3",
+		"vitest": "^3.1.3"
+	},
+	"files": [
+		"dist",
+		"src",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"build": "tsup",
+		"dev": "tsup --watch",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:integration": "vitest run --config vitest.integration.config.ts"
+	}
+}

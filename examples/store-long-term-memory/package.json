@@ -1,0 +1,12 @@
+{
+	"name": "example-store-long-term-memory",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "bun run src/index.ts"
+	},
+	"dependencies": {
+		"@surrealdb/langgraph": "workspace:*"
+	}
+}
