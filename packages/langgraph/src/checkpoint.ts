@@ -466,15 +466,28 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 }
 
 function toBytes(value: unknown): Uint8Array {
+	if (value == null) {
+		throw new Error('toBytes: checkpoint payload is null/undefined');
+	}
+
+	if (value instanceof ArrayBuffer) return new Uint8Array(value);
 	if (value instanceof Uint8Array) return value;
+	if (ArrayBuffer.isView(value)) {
+		const view = value as ArrayBufferView;
+		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+	}
 	if (Array.isArray(value)) return new Uint8Array(value as number[]);
 	if (typeof value === 'string') return new TextEncoder().encode(value);
-	if (
-		typeof value === 'object' &&
-		value !== null &&
-		'buffer' in (value as object)
-	) {
-		return new Uint8Array((value as { buffer: ArrayBufferLike }).buffer);
+	if (typeof value === 'object') {
+		const obj = value as Record<string, unknown>;
+		if (obj.type === 'Buffer' && Array.isArray(obj.data as unknown[])) {
+			return new Uint8Array(obj.data as number[]);
+		}
+		if (obj.buffer instanceof ArrayBuffer) {
+			return new Uint8Array(obj.buffer);
+		}
 	}
-	throw new Error('Unable to coerce checkpoint payload to Uint8Array');
+	throw new Error(
+		`toBytes: unable to coerce checkpoint payload (got ${typeof value})`,
+	);
 }
