@@ -302,7 +302,7 @@ export class VectorStore extends BaseVectorStore {
 			{ name: this.contentField, type: 'TYPE string' },
 			{
 				name: this.metadataField,
-				type: 'FLEXIBLE TYPE object DEFAULT {}',
+				type: 'TYPE object FLEXIBLE DEFAULT {}',
 			},
 			{ name: this.vectorField, type: 'TYPE array<float>' },
 		]);

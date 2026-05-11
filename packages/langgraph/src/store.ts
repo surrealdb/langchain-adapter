@@ -97,7 +97,7 @@ export class Store extends BaseLangGraphStore {
 			const fields = [
 				{ name: 'namespace', type: 'TYPE array<string>' },
 				{ name: 'key', type: 'TYPE string' },
-				{ name: 'value', type: 'FLEXIBLE TYPE object' },
+				{ name: 'value', type: 'TYPE object FLEXIBLE' },
 				{
 					name: 'created_at',
 					type: 'TYPE datetime DEFAULT time::now()',

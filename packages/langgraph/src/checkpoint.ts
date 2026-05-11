@@ -105,7 +105,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 				{ name: 'parent_id', type: 'TYPE option<string>' },
 				{ name: 'type', type: 'TYPE string' },
 				{ name: 'checkpoint', type: 'TYPE bytes' },
-				{ name: 'metadata', type: 'FLEXIBLE TYPE object DEFAULT {}' },
+				{ name: 'metadata', type: 'TYPE object FLEXIBLE DEFAULT {}' },
 				{
 					name: 'created_at',
 					type: 'TYPE datetime DEFAULT time::now()',

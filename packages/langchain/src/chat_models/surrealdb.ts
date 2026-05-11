@@ -88,8 +88,8 @@ export class ChatModel extends BaseLangChainChatModel {
 			const ddl = defineTable(this.tableName, [
 				{ name: 'thread_id', type: 'TYPE option<string>' },
 				{ name: 'llm_type', type: 'TYPE string' },
-				{ name: 'messages', type: 'FLEXIBLE TYPE array' },
-				{ name: 'result', type: 'FLEXIBLE TYPE object' },
+				{ name: 'messages', type: 'TYPE array FLEXIBLE' },
+				{ name: 'result', type: 'TYPE object FLEXIBLE' },
 				{
 					name: 'created_at',
 					type: 'TYPE datetime DEFAULT time::now()',
