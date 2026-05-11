@@ -7,10 +7,12 @@
 		"examples/*"
 	],
 	"scripts": {
-		"build": "bun run --filter '@surrealdb/*' build",
-		"typecheck": "tsc --noEmit",
-		"test": "bun run --filter '@surrealdb/*' test",
-		"test:integration": "bun run --filter '@surrealdb/*' test:integration",
+		"build:core": "bun run --filter '@surrealdb/langchain-core' build",
+		"build:rest": "bun run --filter '@surrealdb/langchain' --filter '@surrealdb/langgraph' build",
+		"build": "bun run build:core && bun run build:rest",
+		"typecheck": "bun run build:core && tsc --noEmit",
+		"test": "bun run build:core && bun run --filter '@surrealdb/*' test",
+		"test:integration": "bun run build:core && bun run --filter '@surrealdb/*' test:integration",
 		"lint": "biome lint .",
 		"format": "biome format --write .",
 		"check": "biome check --write .",
