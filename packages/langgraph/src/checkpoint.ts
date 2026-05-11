@@ -280,8 +280,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 				bindings[bind] = value;
 			}
 		}
-		const limitClause =
-			typeof limit === 'number' ? ` LIMIT ${limit}` : '';
+		const limitClause = typeof limit === 'number' ? ` LIMIT ${limit}` : '';
 
 		bindings.table = this.checkpointsTable;
 		const rows = await this.client.queryAll<CheckpointRow>(
@@ -345,6 +344,16 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 
 		const [type, bytes] = await this.serde.dumpsTyped(checkpoint);
 
+		const row: Record<string, unknown> = {
+			thread_id: threadId,
+			checkpoint_ns: checkpointNs,
+			checkpoint_id: checkpoint.id,
+			type,
+			checkpoint: bytes,
+			metadata,
+		};
+		if (parentId !== undefined) row.parent_id = parentId;
+
 		await this.client.execute(
 			`UPSERT type::record($table, [$tid, $ns, $cid]) CONTENT $row`,
 			{
@@ -352,15 +361,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 				tid: threadId,
 				ns: checkpointNs,
 				cid: checkpoint.id,
-				row: {
-					thread_id: threadId,
-					checkpoint_ns: checkpointNs,
-					checkpoint_id: checkpoint.id,
-					parent_id: parentId ?? null,
-					type,
-					checkpoint: bytes,
-					metadata,
-				},
+				row,
 			},
 		);
 
@@ -381,9 +382,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		await this.setup();
 		const threadId = String(config.configurable?.thread_id ?? '');
 		const checkpointNs = String(config.configurable?.checkpoint_ns ?? '');
-		const checkpointId = String(
-			config.configurable?.checkpoint_id ?? '',
-		);
+		const checkpointId = String(config.configurable?.checkpoint_id ?? '');
 		if (!threadId || !checkpointId) {
 			throw new Error(
 				'CheckpointSaver.putWrites requires thread_id and checkpoint_id in configurable',

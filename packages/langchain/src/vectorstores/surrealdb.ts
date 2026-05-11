@@ -203,7 +203,8 @@ export class VectorStore extends BaseVectorStore {
 				[this.vectorField]: vectors[i],
 			};
 			if (ids?.[i]) {
-				record[this.idField] = `${this.tableName}:${escapeId(ids[i] as string)}`;
+				record[this.idField] =
+					`${this.tableName}:${escapeId(ids[i] as string)}`;
 			}
 			return record;
 		});
@@ -319,13 +320,10 @@ export class VectorStore extends BaseVectorStore {
 	}
 }
 
-function explicitDistance(
-	strategy: DistanceStrategy,
-	field: string,
-): string {
+function explicitDistance(strategy: DistanceStrategy, field: string): string {
 	switch (strategy) {
 		case 'cosine':
-			return `vector::distance::cosine(${field}, $vec)`;
+			return `(1.0 - vector::similarity::cosine(${field}, $vec))`;
 		case 'euclidean':
 			return `vector::distance::euclidean(${field}, $vec)`;
 		case 'manhattan':
@@ -344,7 +342,11 @@ function stringifyRecordId(value: unknown): string {
 	if (value == null) return '';
 	if (typeof value === 'string') return value;
 	if (typeof value === 'object' && value !== null) {
-		const obj = value as { tb?: string; id?: unknown; toString?: () => string };
+		const obj = value as {
+			tb?: string;
+			id?: unknown;
+			toString?: () => string;
+		};
 		if (obj.tb && obj.id !== undefined) {
 			return `${obj.tb}:${String(obj.id)}`;
 		}

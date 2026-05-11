@@ -114,10 +114,7 @@ export class Store extends BaseLangGraphStore {
 				});
 			}
 			await this.client.execute(defineTable(this.tableName, fields));
-			await this.client.execute(
-				`DEFINE INDEX IF NOT EXISTS ${this.tableName}_pk ON ${this.tableName} ` +
-					`FIELDS namespace, key UNIQUE;`,
-			);
+
 			await this.client.execute(
 				`DEFINE INDEX IF NOT EXISTS ${this.tableName}_ns ON ${this.tableName} ` +
 					`FIELDS namespace;`,
@@ -184,9 +181,8 @@ export class Store extends BaseLangGraphStore {
 				this.index.fields ?? ['$'];
 			const texts = extractTexts(op.value, fields);
 			if (texts.length > 0) {
-				const vectors = await this.index.embeddings.embedDocuments(
-					texts,
-				);
+				const vectors =
+					await this.index.embeddings.embedDocuments(texts);
 				embedding = averageVectors(vectors);
 			}
 		}
@@ -223,7 +219,11 @@ export class Store extends BaseLangGraphStore {
 			let i = 0;
 			for (const [key, value] of Object.entries(op.filter)) {
 				const bind = `f${i++}`;
-				if (value && typeof value === 'object' && !Array.isArray(value)) {
+				if (
+					value &&
+					typeof value === 'object' &&
+					!Array.isArray(value)
+				) {
 					for (const [opName, opValue] of Object.entries(
 						value as Record<string, unknown>,
 					)) {
@@ -248,8 +248,9 @@ export class Store extends BaseLangGraphStore {
 				conditions.length > 0
 					? `WHERE ${conditions.join(' AND ')}`
 					: '';
+			// v3 has no vector::distance::cosine — derive distance from similarity.
 			const surql =
-				`SELECT *, vector::distance::cosine(embedding, $vec) AS __score__ ` +
+				`SELECT *, (1.0 - vector::similarity::cosine(embedding, $vec)) AS __score__ ` +
 				`FROM type::table($table) ` +
 				`${whereClause} ` +
 				`ORDER BY __score__ ASC LIMIT ${limit} START ${offset}`;
@@ -262,7 +263,8 @@ export class Store extends BaseLangGraphStore {
 			}));
 		}
 
-		const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+		const where =
+			conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 		const rows = await this.client.queryAll<StoreRow>(
 			`SELECT * FROM type::table($table) ${where} ` +
 				`ORDER BY created_at DESC LIMIT ${limit} START ${offset}`,
@@ -323,8 +325,7 @@ function matchesCondition(c: MatchCondition, key: string[]): boolean {
 	}
 	if (matchType === 'suffix') {
 		return path.every(
-			(p, i) =>
-				p === '*' || key[key.length - path.length + i] === p,
+			(p, i) => p === '*' || key[key.length - path.length + i] === p,
 		);
 	}
 	throw new Error(`Unsupported match type: ${matchType}`);
