@@ -161,15 +161,23 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 
 		const row = checkpointId
 			? await this.client.queryOne<CheckpointRow>(
-					`SELECT * FROM ${this.checkpointsTable} ` +
-						`WHERE thread_id = $tid AND checkpoint_ns = $ns AND checkpoint_id = $cid`,
-					{ tid: threadId, ns: checkpointNs, cid: checkpointId },
+					`SELECT * FROM type::thing($table, [$tid, $ns, $cid])`,
+					{
+						table: this.checkpointsTable,
+						tid: threadId,
+						ns: checkpointNs,
+						cid: checkpointId,
+					},
 				)
 			: await this.client.queryOne<CheckpointRow>(
-					`SELECT * FROM ${this.checkpointsTable} ` +
+					`SELECT * FROM type::table($table) ` +
 						`WHERE thread_id = $tid AND checkpoint_ns = $ns ` +
 						`ORDER BY checkpoint_id DESC LIMIT 1`,
-					{ tid: threadId, ns: checkpointNs },
+					{
+						table: this.checkpointsTable,
+						tid: threadId,
+						ns: checkpointNs,
+					},
 				);
 
 		if (!row) return undefined;
@@ -192,10 +200,11 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		}
 
 		const writes = await this.client.queryAll<CheckpointWriteRow>(
-			`SELECT * FROM ${this.writesTable} ` +
+			`SELECT * FROM type::table($table) ` +
 				`WHERE thread_id = $tid AND checkpoint_ns = $ns AND checkpoint_id = $cid ` +
 				`ORDER BY task_id, idx ASC`,
 			{
+				table: this.writesTable,
 				tid: threadId,
 				ns: checkpointNs,
 				cid: row.checkpoint_id,
@@ -274,8 +283,9 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		const limitClause =
 			typeof limit === 'number' ? ` LIMIT ${limit}` : '';
 
+		bindings.table = this.checkpointsTable;
 		const rows = await this.client.queryAll<CheckpointRow>(
-			`SELECT * FROM ${this.checkpointsTable} ` +
+			`SELECT * FROM type::table($table) ` +
 				`WHERE ${conditions.join(' AND ')} ` +
 				`ORDER BY checkpoint_id DESC${limitClause}`,
 			bindings,
@@ -336,26 +346,21 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		const [type, bytes] = await this.serde.dumpsTyped(checkpoint);
 
 		await this.client.execute(
-			`UPSERT ${this.checkpointsTable} ` +
-				`MERGE { ` +
-				`thread_id: $tid, ` +
-				`checkpoint_ns: $ns, ` +
-				`checkpoint_id: $cid, ` +
-				`parent_id: $parent, ` +
-				`type: $type, ` +
-				`checkpoint: $bytes, ` +
-				`metadata: $metadata, ` +
-				`created_at: time::now() ` +
-				`} ` +
-				`WHERE thread_id = $tid AND checkpoint_ns = $ns AND checkpoint_id = $cid`,
+			`UPSERT type::thing($table, [$tid, $ns, $cid]) CONTENT $row`,
 			{
+				table: this.checkpointsTable,
 				tid: threadId,
 				ns: checkpointNs,
 				cid: checkpoint.id,
-				parent: parentId ?? null,
-				type,
-				bytes,
-				metadata,
+				row: {
+					thread_id: threadId,
+					checkpoint_ns: checkpointNs,
+					checkpoint_id: checkpoint.id,
+					parent_id: parentId ?? null,
+					type,
+					checkpoint: bytes,
+					metadata,
+				},
 			},
 		);
 
@@ -402,42 +407,41 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 			}),
 		);
 
-		await this.client.tx(async (db) => {
+		await this.client.tx(async (tx) => {
 			for (const row of rows) {
 				const isSpecial = row.channel in WRITES_IDX_MAP;
+				const bindings = {
+					table: this.writesTable,
+					tid: row.thread_id,
+					ns: row.checkpoint_ns,
+					cid: row.checkpoint_id,
+					task: row.task_id,
+					idx: row.idx,
+					row,
+				};
 				if (isSpecial) {
-					// Insert-only-if-absent: skip when a row at the same key exists.
-					const existing = await db.query<[unknown[]]>(
-						`SELECT id FROM ${this.writesTable} ` +
-							`WHERE thread_id = $tid AND checkpoint_ns = $ns ` +
-							`AND checkpoint_id = $cid AND task_id = $task AND idx = $idx`,
-						{
-							tid: row.thread_id,
-							ns: row.checkpoint_ns,
-							cid: row.checkpoint_id,
-							task: row.task_id,
-							idx: row.idx,
-						},
-					);
-					if ((existing[0] as unknown[])?.length) continue;
-					await db.query(
-						`CREATE ${this.writesTable} CONTENT $row`,
-						{ row },
-					);
+					// Insert-only-if-absent for the well-known channels.
+					const existing = await tx
+						.query<[unknown[]]>(
+							`SELECT id FROM type::thing($table, [$tid, $ns, $cid, $task, $idx])`,
+							bindings,
+						)
+						.collect();
+					const found = existing[0];
+					if (Array.isArray(found) && found.length > 0) continue;
+					await tx
+						.query(
+							`CREATE type::thing($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
+							bindings,
+						)
+						.collect();
 				} else {
-					await db.query(
-						`UPSERT ${this.writesTable} MERGE $row ` +
-							`WHERE thread_id = $tid AND checkpoint_ns = $ns ` +
-							`AND checkpoint_id = $cid AND task_id = $task AND idx = $idx`,
-						{
-							row,
-							tid: row.thread_id,
-							ns: row.checkpoint_ns,
-							cid: row.checkpoint_id,
-							task: row.task_id,
-							idx: row.idx,
-						},
-					);
+					await tx
+						.query(
+							`UPSERT type::thing($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
+							bindings,
+						)
+						.collect();
 				}
 			}
 		});
@@ -445,15 +449,19 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 
 	override async deleteThread(threadId: string): Promise<void> {
 		await this.setup();
-		await this.client.tx(async (db) => {
-			await db.query(
-				`DELETE FROM ${this.checkpointsTable} WHERE thread_id = $tid`,
-				{ tid: threadId },
-			);
-			await db.query(
-				`DELETE FROM ${this.writesTable} WHERE thread_id = $tid`,
-				{ tid: threadId },
-			);
+		await this.client.tx(async (tx) => {
+			await tx
+				.query(
+					`DELETE FROM type::table($table) WHERE thread_id = $tid`,
+					{ table: this.checkpointsTable, tid: threadId },
+				)
+				.collect();
+			await tx
+				.query(
+					`DELETE FROM type::table($table) WHERE thread_id = $tid`,
+					{ table: this.writesTable, tid: threadId },
+				)
+				.collect();
 		});
 	}
 }

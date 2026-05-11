@@ -141,32 +141,30 @@ export class Store extends BaseLangGraphStore {
 		operations: Op,
 	): Promise<OperationResults<Op>> {
 		await this.setup();
+		// Note: operations are executed sequentially as independent RPCs.
+		// Cross-operation atomicity is a v1.1 concern.
 		const results: unknown[] = new Array(operations.length);
-
-		await this.client.tx(async () => {
-			for (let i = 0; i < operations.length; i++) {
-				const op = operations[i] as Operation;
-				if ('value' in op) {
-					results[i] = await this.runPut(op as PutOperation);
-				} else if ('namespacePrefix' in op) {
-					results[i] = await this.runSearch(op as SearchOperation);
-				} else if ('key' in op) {
-					results[i] = await this.runGet(op as GetOperation);
-				} else {
-					results[i] = await this.runListNamespaces(
-						op as ListNamespacesOperation,
-					);
-				}
+		for (let i = 0; i < operations.length; i++) {
+			const op = operations[i] as Operation;
+			if ('value' in op) {
+				results[i] = await this.runPut(op as PutOperation);
+			} else if ('namespacePrefix' in op) {
+				results[i] = await this.runSearch(op as SearchOperation);
+			} else if ('key' in op) {
+				results[i] = await this.runGet(op as GetOperation);
+			} else {
+				results[i] = await this.runListNamespaces(
+					op as ListNamespacesOperation,
+				);
 			}
-		});
-
+		}
 		return results as OperationResults<Op>;
 	}
 
 	private async runGet(op: GetOperation): Promise<Item | null> {
 		const row = await this.client.queryOne<StoreRow>(
-			`SELECT * FROM ${this.tableName} WHERE namespace = $ns AND key = $key`,
-			{ ns: op.namespace, key: op.key },
+			`SELECT * FROM type::thing($table, [$ns, $key])`,
+			{ table: this.tableName, ns: op.namespace, key: op.key },
 		);
 		return row ? rowToItem(row) : null;
 	}
@@ -174,8 +172,8 @@ export class Store extends BaseLangGraphStore {
 	private async runPut(op: PutOperation): Promise<void> {
 		if (op.value === null) {
 			await this.client.execute(
-				`DELETE FROM ${this.tableName} WHERE namespace = $ns AND key = $key`,
-				{ ns: op.namespace, key: op.key },
+				`DELETE FROM type::thing($table, [$ns, $key])`,
+				{ table: this.tableName, ns: op.namespace, key: op.key },
 			);
 			return;
 		}
@@ -194,17 +192,17 @@ export class Store extends BaseLangGraphStore {
 		}
 
 		await this.client.execute(
-			`UPSERT ${this.tableName} ` +
-				`MERGE { namespace: $ns, key: $key, value: $value, ` +
-				`updated_at: time::now()` +
-				(embedding ? `, embedding: $embedding` : '') +
-				` } ` +
-				`WHERE namespace = $ns AND key = $key`,
+			`UPSERT type::thing($table, [$ns, $key]) CONTENT $row`,
 			{
+				table: this.tableName,
 				ns: op.namespace,
 				key: op.key,
-				value: op.value,
-				...(embedding ? { embedding } : {}),
+				row: {
+					namespace: op.namespace,
+					key: op.key,
+					value: op.value,
+					...(embedding ? { embedding } : {}),
+				},
 			},
 		);
 	}
@@ -214,7 +212,7 @@ export class Store extends BaseLangGraphStore {
 		const offset = op.offset ?? 0;
 
 		const conditions: string[] = [];
-		const bindings: Record<string, unknown> = {};
+		const bindings: Record<string, unknown> = { table: this.tableName };
 		if (op.namespacePrefix.length > 0) {
 			conditions.push(
 				`namespace[..${op.namespacePrefix.length}] = $nsPrefix`,
@@ -229,7 +227,7 @@ export class Store extends BaseLangGraphStore {
 					for (const [opName, opValue] of Object.entries(
 						value as Record<string, unknown>,
 					)) {
-						const opBind = `${bind}_${opName}`;
+						const opBind = `${bind}_${opName.replace(/^\$/, '')}`;
 						conditions.push(
 							`value.${key} ${cmpOp(opName)} $${opBind}`,
 						);
@@ -246,12 +244,14 @@ export class Store extends BaseLangGraphStore {
 			const [vec] = await this.index.embeddings.embedDocuments([
 				op.query,
 			]);
-			const baseWhere =
-				conditions.length > 0 ? conditions.join(' AND ') + ' AND' : '';
+			const whereClause =
+				conditions.length > 0
+					? `WHERE ${conditions.join(' AND ')}`
+					: '';
 			const surql =
-				`SELECT *, vector::distance::knn() AS __score__ ` +
-				`FROM ${this.tableName} ` +
-				`WHERE ${baseWhere} embedding <|${limit + offset}|> $vec ` +
+				`SELECT *, vector::distance::cosine(embedding, $vec) AS __score__ ` +
+				`FROM type::table($table) ` +
+				`${whereClause} ` +
 				`ORDER BY __score__ ASC LIMIT ${limit} START ${offset}`;
 			const rows = await this.client.queryAll<
 				StoreRow & { __score__: number }
@@ -264,7 +264,7 @@ export class Store extends BaseLangGraphStore {
 
 		const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 		const rows = await this.client.queryAll<StoreRow>(
-			`SELECT * FROM ${this.tableName} ${where} ` +
+			`SELECT * FROM type::table($table) ${where} ` +
 				`ORDER BY created_at DESC LIMIT ${limit} START ${offset}`,
 			bindings,
 		);
@@ -275,7 +275,8 @@ export class Store extends BaseLangGraphStore {
 		op: ListNamespacesOperation,
 	): Promise<string[][]> {
 		const rows = await this.client.queryAll<{ namespace: string[] }>(
-			`SELECT namespace FROM ${this.tableName}`,
+			`SELECT namespace FROM type::table($table)`,
+			{ table: this.tableName },
 		);
 		let namespaces = rows.map((r) => r.namespace);
 		if (op.matchConditions && op.matchConditions.length > 0) {

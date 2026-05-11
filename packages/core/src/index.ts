@@ -1,4 +1,8 @@
-export { RecordId, SurrealDBClient } from './client.js';
+export {
+	RecordId,
+	SurrealDBClient,
+	type SurrealTransaction,
+} from './client.js';
 export {
 	isTokenConfig,
 	isUrlConfig,

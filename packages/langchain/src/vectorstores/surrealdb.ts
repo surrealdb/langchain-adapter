@@ -225,26 +225,23 @@ export class VectorStore extends BaseVectorStore {
 		const { expr, bindings } = translateFilter(filter, {
 			fieldPrefix: this.metadataField,
 		});
-		const filterClause = expr ? ` AND ${expr}` : '';
 		const distExpr = explicitDistance(
 			this.distanceStrategy,
 			this.vectorField,
 		);
 
-		let surql: string;
-		if (this.indexType === 'none') {
-			surql =
-				`SELECT *, ${distExpr} AS __score__ ` +
-				`FROM ${this.tableName} ` +
-				`WHERE 1=1${filterClause} ` +
-				`ORDER BY __score__ ASC LIMIT ${k}`;
-		} else {
-			surql =
-				`SELECT *, vector::distance::knn() AS __score__ ` +
-				`FROM ${this.tableName} ` +
-				`WHERE ${this.vectorField} <|${k}|> $vec${filterClause} ` +
-				`ORDER BY __score__ ASC LIMIT ${k}`;
-		}
+		// We deliberately do NOT use the `<|k|>` index operator here.
+		// SurrealDB v3 rejects it when combined with extra WHERE
+		// conditions ("KNN operators … mixed with unsupported KNN
+		// variants"). Brute-force `vector::distance::X(field, $vec) +
+		// ORDER BY` is always correct; HNSW still helps inserts and
+		// can be used later via a dedicated unfiltered fast path.
+		const whereClause = expr ? `WHERE ${expr} ` : '';
+		const surql =
+			`SELECT *, ${distExpr} AS __score__ ` +
+			`FROM ${this.tableName} ` +
+			`${whereClause}` +
+			`ORDER BY __score__ ASC LIMIT ${k}`;
 
 		const rows = await this.client.queryAll<
 			DocumentRow & { __score__: number }

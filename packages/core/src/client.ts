@@ -1,4 +1,4 @@
-import { RecordId, Surreal } from 'surrealdb';
+import { RecordId, Surreal, type SurrealTransaction } from 'surrealdb';
 import {
 	isTokenConfig,
 	isUrlConfig,
@@ -6,6 +6,7 @@ import {
 } from './config.js';
 
 export { RecordId };
+export type { SurrealTransaction };
 
 /**
  * Thin wrapper around the official SurrealDB SDK that handles connection
@@ -89,15 +90,25 @@ export class SurrealDBClient {
 	/**
 	 * Run a function inside a SurrealQL transaction. The transaction is
 	 * cancelled (rolled back) if the function throws.
+	 *
+	 * Uses the SDK's `beginTransaction()` so all queries issued through
+	 * the passed handle participate in the same server-side transaction.
+	 * Plain string `BEGIN; …; COMMIT;` does not work across separate
+	 * RPC calls — that's why the callback receives a transaction handle
+	 * rather than the raw `Surreal` instance.
 	 */
-	async tx<T>(fn: (db: Surreal) => Promise<T>): Promise<T> {
-		await this.db.query('BEGIN TRANSACTION');
+	async tx<T>(fn: (tx: SurrealTransaction) => Promise<T>): Promise<T> {
+		const tx = await this.db.beginTransaction();
 		try {
-			const result = await fn(this.db);
-			await this.db.query('COMMIT TRANSACTION');
+			const result = await fn(tx);
+			await tx.commit();
 			return result;
 		} catch (err) {
-			await this.db.query('CANCEL TRANSACTION');
+			try {
+				await tx.cancel();
+			} catch {
+				// already rolled back / disconnected — surface the original
+			}
 			throw err;
 		}
 	}
