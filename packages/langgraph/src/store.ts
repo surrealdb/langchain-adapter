@@ -163,7 +163,7 @@ export class Store extends BaseLangGraphStore {
 
 	private async runGet(op: GetOperation): Promise<Item | null> {
 		const row = await this.client.queryOne<StoreRow>(
-			`SELECT * FROM type::thing($table, [$ns, $key])`,
+			`SELECT * FROM type::record($table, [$ns, $key])`,
 			{ table: this.tableName, ns: op.namespace, key: op.key },
 		);
 		return row ? rowToItem(row) : null;
@@ -172,7 +172,7 @@ export class Store extends BaseLangGraphStore {
 	private async runPut(op: PutOperation): Promise<void> {
 		if (op.value === null) {
 			await this.client.execute(
-				`DELETE FROM type::thing($table, [$ns, $key])`,
+				`DELETE FROM type::record($table, [$ns, $key])`,
 				{ table: this.tableName, ns: op.namespace, key: op.key },
 			);
 			return;
@@ -192,7 +192,7 @@ export class Store extends BaseLangGraphStore {
 		}
 
 		await this.client.execute(
-			`UPSERT type::thing($table, [$ns, $key]) CONTENT $row`,
+			`UPSERT type::record($table, [$ns, $key]) CONTENT $row`,
 			{
 				table: this.tableName,
 				ns: op.namespace,

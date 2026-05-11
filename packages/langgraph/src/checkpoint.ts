@@ -161,7 +161,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 
 		const row = checkpointId
 			? await this.client.queryOne<CheckpointRow>(
-					`SELECT * FROM type::thing($table, [$tid, $ns, $cid])`,
+					`SELECT * FROM type::record($table, [$tid, $ns, $cid])`,
 					{
 						table: this.checkpointsTable,
 						tid: threadId,
@@ -346,7 +346,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		const [type, bytes] = await this.serde.dumpsTyped(checkpoint);
 
 		await this.client.execute(
-			`UPSERT type::thing($table, [$tid, $ns, $cid]) CONTENT $row`,
+			`UPSERT type::record($table, [$tid, $ns, $cid]) CONTENT $row`,
 			{
 				table: this.checkpointsTable,
 				tid: threadId,
@@ -423,7 +423,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 					// Insert-only-if-absent for the well-known channels.
 					const existing = await tx
 						.query<[unknown[]]>(
-							`SELECT id FROM type::thing($table, [$tid, $ns, $cid, $task, $idx])`,
+							`SELECT id FROM type::record($table, [$tid, $ns, $cid, $task, $idx])`,
 							bindings,
 						)
 						.collect();
@@ -431,14 +431,14 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 					if (Array.isArray(found) && found.length > 0) continue;
 					await tx
 						.query(
-							`CREATE type::thing($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
+							`CREATE type::record($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
 							bindings,
 						)
 						.collect();
 				} else {
 					await tx
 						.query(
-							`UPSERT type::thing($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
+							`UPSERT type::record($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
 							bindings,
 						)
 						.collect();
