@@ -4,11 +4,7 @@
  * for their `DEFINE TABLE / FIELD / INDEX` statements.
  */
 
-export type DistanceStrategy =
-	| 'cosine'
-	| 'euclidean'
-	| 'manhattan'
-	| 'hamming';
+export type DistanceStrategy = 'cosine' | 'euclidean' | 'manhattan' | 'hamming';
 
 export type VectorIndexType = 'hnsw' | 'mtree' | 'none';
 

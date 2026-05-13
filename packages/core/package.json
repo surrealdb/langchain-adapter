@@ -1,7 +1,7 @@
 {
 	"name": "@surrealdb/langchain-core",
 	"version": "0.1.0",
-	"description": "Shared SurrealDB connection, schema and query helpers for the SurrealDB LangChain.js / LangGraph.js adapters",
+	"description": "Shared SurrealDB connection, schema and query helpers plus a Spectron HTTP client for the SurrealDB LangChain.js / LangGraph.js adapters",
 	"type": "module",
 	"main": "dist/index.cjs",
 	"module": "dist/index.js",
@@ -15,6 +15,16 @@
 			"require": {
 				"types": "./dist/index.d.cts",
 				"default": "./dist/index.cjs"
+			}
+		},
+		"./spectron": {
+			"import": {
+				"types": "./dist/spectron.d.ts",
+				"default": "./dist/spectron.js"
+			},
+			"require": {
+				"types": "./dist/spectron.d.cts",
+				"default": "./dist/spectron.cjs"
 			}
 		},
 		"./package.json": "./package.json"

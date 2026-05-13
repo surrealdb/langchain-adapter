@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import { SurrealDBClient } from '@surrealdb/langchain-core';
+import { describe, expect, it } from 'vitest';
 import { QueryTool } from '../tools/surql.js';
 
 function makeTool(opts: { readOnly?: boolean } = {}) {

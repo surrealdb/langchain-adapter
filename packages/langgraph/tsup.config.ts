@@ -5,6 +5,7 @@ export default defineConfig({
 		index: 'src/index.ts',
 		checkpoint: 'src/checkpoint.ts',
 		store: 'src/store.ts',
+		spectron_store: 'src/spectron_store.ts',
 	},
 	format: ['esm', 'cjs'],
 	dts: true,

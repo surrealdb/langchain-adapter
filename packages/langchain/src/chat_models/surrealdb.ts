@@ -1,17 +1,14 @@
-import {
-	type BaseChatModelCallOptions,
-	type BaseChatModelParams,
-	BaseChatModel as BaseLangChainChatModel,
-} from '@langchain/core/language_models/chat_models';
+import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
 import type {
 	BaseLanguageModelCallOptions,
 	BaseLanguageModelInput,
 } from '@langchain/core/language_models/base';
 import {
-	AIMessageChunk,
-	type BaseMessage,
-} from '@langchain/core/messages';
-import type { CallbackManagerForLLMRun } from '@langchain/core/callbacks/manager';
+	type BaseChatModelCallOptions,
+	type BaseChatModelParams,
+	BaseChatModel as BaseLangChainChatModel,
+} from '@langchain/core/language_models/chat_models';
+import { AIMessageChunk, type BaseMessage } from '@langchain/core/messages';
 import type { ChatGeneration, ChatResult } from '@langchain/core/outputs';
 import {
 	assertIdent,
@@ -162,17 +159,14 @@ export class ChatModel extends BaseLangChainChatModel {
 		messages: BaseMessage[],
 		result: ChatResult,
 	): Promise<void> {
-		await this.client.execute(
-			`CREATE ${this.tableName} CONTENT $row`,
-			{
-				row: {
-					thread_id: this.threadId,
-					llm_type: this.delegate._llmType(),
-					messages: messages.map((m) => m.toDict()),
-					result: serialiseResult(result),
-				},
+		await this.client.execute(`CREATE ${this.tableName} CONTENT $row`, {
+			row: {
+				thread_id: this.threadId,
+				llm_type: this.delegate._llmType(),
+				messages: messages.map((m) => m.toDict()),
+				result: serialiseResult(result),
 			},
-		);
+		});
 	}
 }
 

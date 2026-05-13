@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-	assertIdent,
-	defineTable,
-	defineVectorIndex,
-} from '../schema.js';
+import { assertIdent, defineTable, defineVectorIndex } from '../schema.js';
 
 describe('assertIdent', () => {
 	it('accepts snake_case identifiers', () => {
@@ -24,7 +20,9 @@ describe('defineTable', () => {
 			{ name: 'age', type: 'TYPE int DEFAULT 0' },
 		]);
 		expect(ddl).toContain('DEFINE TABLE IF NOT EXISTS users SCHEMAFULL');
-		expect(ddl).toContain('DEFINE FIELD IF NOT EXISTS name ON users TYPE string');
+		expect(ddl).toContain(
+			'DEFINE FIELD IF NOT EXISTS name ON users TYPE string',
+		);
 		expect(ddl).toContain(
 			'DEFINE FIELD IF NOT EXISTS age ON users TYPE int DEFAULT 0',
 		);

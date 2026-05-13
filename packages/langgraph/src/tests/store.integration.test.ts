@@ -67,7 +67,11 @@ describe('Store', () => {
 	it('preserves order in batch results', async () => {
 		const result = await store.batch([
 			{ namespace: ['users', 'alice'], key: 'profile' },
-			{ namespace: ['users'], namespacePrefix: ['users'], limit: 1 } as any,
+			{
+				namespace: ['users'],
+				namespacePrefix: ['users'],
+				limit: 1,
+			} as any,
 			{ matchConditions: [], limit: 100, offset: 0 } as any,
 		]);
 		expect(Array.isArray(result)).toBe(true);

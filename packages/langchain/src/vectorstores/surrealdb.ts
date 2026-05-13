@@ -1,16 +1,16 @@
+import { Document, type DocumentInterface } from '@langchain/core/documents';
+import type { EmbeddingsInterface } from '@langchain/core/embeddings';
+import { VectorStore as BaseVectorStore } from '@langchain/core/vectorstores';
 import {
 	assertIdent,
+	type DistanceStrategy,
 	defineTable,
 	defineVectorIndex,
-	type DistanceStrategy,
 	SurrealDBClient,
 	type SurrealDBStoreConfig,
 	translateFilter,
 	type VectorIndexType,
 } from '@surrealdb/langchain-core';
-import { Document, type DocumentInterface } from '@langchain/core/documents';
-import type { EmbeddingsInterface } from '@langchain/core/embeddings';
-import { VectorStore as BaseVectorStore } from '@langchain/core/vectorstores';
 
 export type { DistanceStrategy, VectorIndexType };
 

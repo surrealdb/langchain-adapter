@@ -1,10 +1,10 @@
 import type { CallbackManagerForRetrieverRun } from '@langchain/core/callbacks/manager';
+import { Document, type DocumentInterface } from '@langchain/core/documents';
+import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import {
 	BaseRetriever as BaseLangChainRetriever,
 	type BaseRetrieverInput,
 } from '@langchain/core/retrievers';
-import { Document, type DocumentInterface } from '@langchain/core/documents';
-import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import {
 	assertIdent,
 	SurrealDBClient,
@@ -135,10 +135,9 @@ export class HybridRetriever extends BaseLangChainRetriever {
 				`FROM ${this.tableName} ` +
 				`WHERE id IN ((SELECT VALUE ->${edge}->${this.tableName} AS x ` +
 				`FROM $seedIds).x.flatten())`;
-			const neighbours = await this.client.queryAll<RawHit>(
-				expandSurql,
-				{ seedIds: ids },
-			);
+			const neighbours = await this.client.queryAll<RawHit>(expandSurql, {
+				seedIds: ids,
+			});
 			for (const n of neighbours) {
 				if (!fanout.has(idKey(n.id))) fanout.set(idKey(n.id), n);
 			}

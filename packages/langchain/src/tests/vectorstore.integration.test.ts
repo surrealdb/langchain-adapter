@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Document } from '@langchain/core/documents';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VectorStore } from '../vectorstores/surrealdb.js';
 import { FakeEmbeddings, makeConfig } from './helpers.js';
 
@@ -43,11 +43,9 @@ describe('VectorStore', () => {
 	});
 
 	it('respects metadata filters', async () => {
-		const hits = await store.similaritySearchWithScore(
-			'orange citrus',
-			3,
-			{ tag: 'vehicle' },
-		);
+		const hits = await store.similaritySearchWithScore('orange citrus', 3, {
+			tag: 'vehicle',
+		});
 		for (const [doc] of hits) {
 			expect(doc.metadata?.tag).toBe('vehicle');
 		}

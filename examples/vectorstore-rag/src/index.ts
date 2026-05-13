@@ -39,7 +39,9 @@ const hits = await store.similaritySearchWithScore(
 	2,
 );
 for (const [doc, score] of hits) {
-	console.log(`[${score.toFixed(4)}] (${doc.metadata?.topic}) ${doc.pageContent}`);
+	console.log(
+		`[${score.toFixed(4)}] (${doc.metadata?.topic}) ${doc.pageContent}`,
+	);
 }
 
 await store.close();

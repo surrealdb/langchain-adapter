@@ -1,8 +1,14 @@
 export {
+	SpectronQueryTool,
+	type SpectronQueryToolArgs,
+	SpectronReflectTool,
+	type SpectronReflectToolArgs,
+} from './spectron.js';
+export {
+	type CreateToolArgs,
 	createTool,
 	QueryTool,
-	RecordTool,
-	type CreateToolArgs,
 	type QueryToolArgs,
+	RecordTool,
 	type RecordToolArgs,
 } from './surql.js';

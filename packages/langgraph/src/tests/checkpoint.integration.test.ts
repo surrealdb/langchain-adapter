@@ -1,5 +1,8 @@
+import type {
+	Checkpoint,
+	CheckpointMetadata,
+} from '@langchain/langgraph-checkpoint';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Checkpoint, CheckpointMetadata } from '@langchain/langgraph-checkpoint';
 import { CheckpointSaver } from '../checkpoint.js';
 import { makeConfig } from './helpers.js';
 

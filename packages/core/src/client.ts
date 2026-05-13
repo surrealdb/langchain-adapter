@@ -5,8 +5,8 @@ import {
 	type SurrealDBStoreConfig,
 } from './config.js';
 
-export { RecordId };
 export type { SurrealTransaction };
+export { RecordId };
 
 /**
  * Thin wrapper around the official SurrealDB SDK that handles connection

@@ -37,6 +37,16 @@
 				"default": "./dist/store.cjs"
 			}
 		},
+		"./spectron_store": {
+			"import": {
+				"types": "./dist/spectron_store.d.ts",
+				"default": "./dist/spectron_store.js"
+			},
+			"require": {
+				"types": "./dist/spectron_store.d.cts",
+				"default": "./dist/spectron_store.cjs"
+			}
+		},
 		"./package.json": "./package.json"
 	},
 	"license": "Apache-2.0",

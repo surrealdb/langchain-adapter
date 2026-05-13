@@ -1,6 +1,6 @@
 import { HumanMessage } from '@langchain/core/messages';
+import { Annotation, END, START, StateGraph } from '@langchain/langgraph';
 import { ChatOpenAI } from '@langchain/openai';
-import { Annotation, StateGraph, START, END } from '@langchain/langgraph';
 import { CheckpointSaver } from '@surrealdb/langgraph';
 
 const State = Annotation.Root({
@@ -34,10 +34,7 @@ const checkpointer = new CheckpointSaver({
 const app = graph.compile({ checkpointer });
 const config = { configurable: { thread_id: 'demo-thread' } };
 
-await app.invoke(
-	{ messages: ['user: What is SurrealDB?'] },
-	config,
-);
+await app.invoke({ messages: ['user: What is SurrealDB?'] }, config);
 const final = await app.invoke(
 	{ messages: ['user: And what makes it different from Postgres?'] },
 	config,

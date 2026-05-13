@@ -1,6 +1,7 @@
 import {
 	BaseStore as BaseLangGraphStore,
 	type GetOperation,
+	getTextAtPath,
 	type IndexConfig,
 	type Item,
 	type ListNamespacesOperation,
@@ -10,13 +11,12 @@ import {
 	type PutOperation,
 	type SearchItem,
 	type SearchOperation,
-	getTextAtPath,
 } from '@langchain/langgraph-checkpoint';
 import {
 	assertIdent,
+	type DistanceStrategy,
 	defineTable,
 	defineVectorIndex,
-	type DistanceStrategy,
 	SurrealDBClient,
 	type SurrealDBStoreConfig,
 } from '@surrealdb/langchain-core';

@@ -1,0 +1,14 @@
+{
+	"name": "example-spectron-memory",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "bun run src/index.ts"
+	},
+	"dependencies": {
+		"@surrealdb/langchain": "workspace:*",
+		"@surrealdb/langchain-core": "workspace:*",
+		"@surrealdb/langgraph": "workspace:*"
+	}
+}

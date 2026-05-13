@@ -1,9 +1,9 @@
+import type { CallbackManagerForToolRun } from '@langchain/core/callbacks/manager';
+import { StructuredTool, type ToolParams } from '@langchain/core/tools';
 import {
 	SurrealDBClient,
 	type SurrealDBStoreConfig,
 } from '@surrealdb/langchain-core';
-import type { CallbackManagerForToolRun } from '@langchain/core/callbacks/manager';
-import { StructuredTool, type ToolParams } from '@langchain/core/tools';
 import { z } from 'zod';
 
 const READ_ONLY_PREFIX = /^\s*(SELECT|INFO|RETURN|LIVE)\b/i;
@@ -134,9 +134,7 @@ export interface RecordToolArgs<S extends z.ZodTypeAny>
  * — it only fills in the typed parameters. Lower injection surface than
  * {@link QueryTool}.
  */
-export class RecordTool<
-	S extends z.ZodTypeAny,
-> extends StructuredTool<S> {
+export class RecordTool<S extends z.ZodTypeAny> extends StructuredTool<S> {
 	override name: string;
 	override description: string;
 	override schema: S;
@@ -190,10 +188,7 @@ export interface CreateToolArgs<S extends z.ZodTypeAny>
 	name: string;
 	description: string;
 	schema: S;
-	handler: (
-		client: SurrealDBClient,
-		input: z.infer<S>,
-	) => Promise<unknown>;
+	handler: (client: SurrealDBClient, input: z.infer<S>) => Promise<unknown>;
 }
 
 /**
@@ -221,9 +216,7 @@ export function createTool<S extends z.ZodTypeAny>(
 				connected = true;
 			}
 			const result = await args.handler(client, input);
-			return typeof result === 'string'
-				? result
-				: JSON.stringify(result);
+			return typeof result === 'string' ? result : JSON.stringify(result);
 		}
 	}
 
