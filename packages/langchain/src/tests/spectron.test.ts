@@ -1,4 +1,4 @@
-import { SpectronClient } from '@surrealdb/langchain-core';
+import { Spectron } from '@surrealdb/langchain-core';
 import { describe, expect, it, vi } from 'vitest';
 import { SpectronRetriever } from '../retrievers/spectron.js';
 import { SpectronQueryTool, SpectronReflectTool } from '../tools/spectron.js';
@@ -10,11 +10,11 @@ function jsonResponse(body: unknown): Response {
 	});
 }
 
-function mockedClient(handler: (url: string) => unknown): SpectronClient {
+function mockedClient(handler: (url: string) => unknown): Spectron {
 	const fetchMock = vi.fn(async (input: string | URL | Request) =>
 		jsonResponse(handler(String(input))),
 	);
-	return new SpectronClient({
+	return new Spectron({
 		context: 'ctx',
 		apiKey: 'sk-test',
 		endpoint: 'https://api.example.test',

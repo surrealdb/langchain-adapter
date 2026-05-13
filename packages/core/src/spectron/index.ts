@@ -1,4 +1,8 @@
-export { SpectronClient, type SpectronConfig } from './client.js';
+export {
+	Spectron,
+	SpectronClient,
+	type SpectronConfig,
+} from './client.js';
 export {
 	AuthError,
 	errorFromResponse,
@@ -69,21 +73,20 @@ export type {
 	UploadResponse,
 } from './models.js';
 export {
-	KeywordsNamespace,
-	KnowledgeNamespace,
-	NodesNamespace,
-	type NodesUpsertArgs,
-	type QueryArgs,
-	type TraverseArgs,
-	type UploadArgs,
+	Knowledge,
+	KnowledgeKeywords,
+	KnowledgeNodes,
+	type NodesUpsertOptions,
+	type QueryOptions,
+	type TraverseOptions,
+	type UploadOptions,
 } from './namespaces/knowledge.js';
 export {
-	EntitiesNamespace,
-	LifecycleNamespace,
-	MemoryNamespace,
+	Entities,
+	Lifecycle,
 	Session,
-	SessionsNamespace,
-	TracesNamespace,
+	Sessions,
+	Traces,
 } from './namespaces/memory.js';
 export { backoffSchedule, shouldRetry } from './retry.js';
 export {

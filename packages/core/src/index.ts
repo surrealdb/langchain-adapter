@@ -30,6 +30,7 @@ export {
 	RateLimitError as SpectronRateLimitError,
 	ScopeError as SpectronScopeError,
 	ServerError as SpectronServerError,
+	Spectron,
 	SpectronClient,
 	type SpectronConfig,
 	SpectronError,

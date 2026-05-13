@@ -54,9 +54,9 @@ the client at staging, dev or a self-hosted deployment.
 ### Install and configure
 
 ```ts
-import { SpectronClient } from '@surrealdb/langchain-core';
+import { Spectron } from '@surrealdb/langchain-core';
 
-const spectronClient = new SpectronClient({
+const spectronClient = new Spectron({
 	context: 'acme-prod',
 	apiKey: process.env.SPECTRON_API_KEY!,
 	endpoint: 'https://api.spectron.dev',
@@ -114,21 +114,19 @@ not supported in the JS client (read with `node:fs/promises.readFile` first).
 ```ts
 import type { SpectronQueryMode } from '@surrealdb/langchain-core';
 
-const spectronHits = await spectronClient.knowledge.query(
-	'return window for unopened items?',
-	{
-		mode: 'hybrid_graph' satisfies SpectronQueryMode, // 'vector' | 'bm25' | 'hybrid' | 'hybrid_graph'
-		k: 10,
-		threshold: 0.5,
-		vectorWeight: 0.5,
-		rrfK: 60,
-		graphAlpha: 0.3,
-		graphEdges: ['knowledge_has_keyword', 'knowledge_relates_to'],
-		graphDepth: 2,
-		expandGraph: true,
-		filter: { mimeType: ['application/pdf'], scope: { org: 'anneal' } },
-	},
-);
+const spectronHits = await spectronClient.knowledge.query({
+	query: 'return window for unopened items?',
+	mode: 'hybrid_graph' satisfies SpectronQueryMode, // 'vector' | 'bm25' | 'hybrid' | 'hybrid_graph'
+	k: 10,
+	threshold: 0.5,
+	vectorWeight: 0.5,
+	rrfK: 60,
+	graphAlpha: 0.3,
+	graphEdges: ['knowledge_has_keyword', 'knowledge_relates_to'],
+	graphDepth: 2,
+	expandGraph: true,
+	filter: { mimeType: ['application/pdf'], scope: { org: 'anneal' } },
+});
 ```
 
 #### Keywords
@@ -136,7 +134,7 @@ const spectronHits = await spectronClient.knowledge.query(
 ```ts
 await spectronClient.knowledge.keywords.list({ minDocumentCount: 2, sort: '-document_count', q: 'return' });
 await spectronClient.knowledge.keywords.get('RETURN POLICY');
-await spectronClient.knowledge.keywords.search('refund policies', { k: 10, threshold: 0.6 });
+await spectronClient.knowledge.keywords.search({ query: 'refund policies', k: 10, threshold: 0.6 });
 await spectronClient.knowledge.keywords.related('RETURN POLICY');
 await spectronClient.knowledge.keywords.forDocument(spectronDoc.id);
 ```
@@ -158,7 +156,7 @@ await spectronClient.knowledge.nodes.upsert({
 });
 
 await spectronClient.knowledge.nodes.list({ kind: 'product' });
-await spectronClient.knowledge.nodes.search('audio products', { k: 10 });
+await spectronClient.knowledge.nodes.search({ query: 'audio products', k: 10 });
 await spectronClient.knowledge.nodes.get('product', 'airpods_pro_2');
 await spectronClient.knowledge.nodes.related('product', 'airpods_pro_2');
 await spectronClient.knowledge.nodes.delete('product', 'airpods_pro_2');
@@ -191,7 +189,7 @@ Let Spectron run the loop:
 
 ```ts
 const spectronSession = await spectronClient.sessions.create({ scope: { user: 'tobie' } });
-const spectronReply = await spectronSession.chat('What do you know about me?');
+const spectronReply = await spectronSession.chat({ message: 'What do you know about me?' });
 await spectronSession.close();
 ```
 
@@ -200,11 +198,11 @@ Or drive it yourself:
 ```ts
 const spectronSession = await spectronClient.sessions.create({ scope: { user: 'tobie' } });
 
-await spectronSession.turn('user', 'I just got promoted to CTO');
+await spectronSession.turn({ role: 'user', content: 'I just got promoted to CTO' });
 
-const spectronContext = await spectronSession.context('What is Tobie’s role?');
+const spectronContext = await spectronSession.context({ query: 'What is Tobie’s role?' });
 const llmReply = await myLLM.chat({ system: spectronContext.context, user: userMessage });
-await spectronSession.turn('assistant', llmReply);
+await spectronSession.turn({ role: 'assistant', content: llmReply });
 
 await spectronSession.turns();
 await spectronSession.close();
@@ -213,8 +211,8 @@ await spectronSession.close();
 ### One-shot retrieval
 
 ```ts
-await spectronClient.query('What role does Christian have?', { k: 10 });
-await spectronClient.context('brief on tobie', { k: 10 });
+await spectronClient.query({ query: 'What role does Christian have?', k: 10 });
+await spectronClient.context({ query: 'brief on tobie', k: 10 });
 ```
 
 ### State, profile, entities
@@ -232,8 +230,8 @@ await spectronClient.entities.delete('Person', 'christian_battaglia'); // soft d
 ### Reflect, forget, lifecycle, traces
 
 ```ts
-await spectronClient.reflect('patterns in customer complaints this month?', { persist: true });
-await spectronClient.forget('anything about my old job');
+await spectronClient.reflect({ query: 'patterns in customer complaints this month?', persist: true });
+await spectronClient.forget({ query: 'anything about my old job' });
 
 await spectronClient.lifecycle.expire();
 await spectronClient.lifecycle.decay();
@@ -345,13 +343,13 @@ import { SpectronStore } from '@surrealdb/langgraph/spectron_store';
 
 const spectronStore = new SpectronStore({ spectron: spectronClient });
 await spectronStore.get(['Person'], 'tobie');                                  // → entities.get
-await spectronStore.search(['Person'], { query: 'who is tobie?', limit: 5 });  // → memory.query
+await spectronStore.search(['Person'], { query: 'who is tobie?', limit: 5 });  // → Spectron.query
 ```
 
 | Method            | Backed by              | Supported              |
 | ----------------- | ---------------------- | ---------------------- |
 | `get`             | `entities.get`         | yes                    |
-| `search`          | `memory.query`         | yes (requires `query`) |
+| `search`          | `Spectron.query`       | yes (requires `query`) |
 | `put`             | —                      | throws                 |
 | `delete`          | —                      | throws                 |
 | `listNamespaces`  | —                      | throws                 |

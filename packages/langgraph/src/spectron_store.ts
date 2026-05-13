@@ -9,10 +9,10 @@ import {
 	type SearchItem,
 	type SearchOperation,
 } from '@langchain/langgraph-checkpoint';
-import { SpectronClient, type SpectronConfig } from '@surrealdb/langchain-core';
+import { Spectron, type SpectronConfig } from '@surrealdb/langchain-core';
 
 export interface SpectronStoreArgs {
-	spectron: SpectronClient | SpectronConfig;
+	spectron: Spectron | SpectronConfig;
 	namespaceSeparator?: string;
 }
 
@@ -38,15 +38,15 @@ function parseDate(v: string | null | undefined): Date {
 // Read-only: Spectron writes flow through session turns and reflections, not
 // a flat K/V API, so put/delete/listNamespaces throw.
 export class SpectronStore extends BaseLangGraphStore {
-	readonly client: SpectronClient;
+	readonly client: Spectron;
 	readonly namespaceSeparator: string;
 
 	constructor(args: SpectronStoreArgs) {
 		super();
 		this.client =
-			args.spectron instanceof SpectronClient
+			args.spectron instanceof Spectron
 				? args.spectron
-				: new SpectronClient(args.spectron);
+				: new Spectron(args.spectron);
 		this.namespaceSeparator = args.namespaceSeparator ?? '/';
 	}
 
@@ -67,7 +67,7 @@ export class SpectronStore extends BaseLangGraphStore {
 			operations.map(async (op, idx) => {
 				if (isPut(op)) {
 					throw new Error(
-						'SpectronStore does not support put/delete: Spectron memory is written via session turns or reflections, not raw key/value writes. Use SpectronClient.sessions / .reflect directly.',
+						'SpectronStore does not support put/delete: Spectron memory is written via session turns or reflections, not raw key/value writes. Use Spectron.sessions / .reflect directly.',
 					);
 				}
 				if (isListNamespaces(op)) {
@@ -118,10 +118,11 @@ export class SpectronStore extends BaseLangGraphStore {
 	private async handleSearch(op: SearchOperation): Promise<SearchItem[]> {
 		if (!op.query) {
 			throw new Error(
-				'SpectronStore.search requires a `query` string — Spectron only supports semantic queries via memory.query.',
+				'SpectronStore.search requires a `query` string — Spectron only supports semantic queries via Spectron.query.',
 			);
 		}
-		const response = await this.client.memory.query(op.query, {
+		const response = await this.client.query({
+			query: op.query,
 			k: op.limit,
 		});
 		const namespace = op.namespacePrefix;

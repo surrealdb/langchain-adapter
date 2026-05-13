@@ -1,5 +1,5 @@
 // Required env: SPECTRON_API_KEY, SPECTRON_CONTEXT, SPECTRON_ENDPOINT.
-import { SpectronClient } from '@surrealdb/langchain-core';
+import { Spectron } from '@surrealdb/langchain-core';
 import { SpectronRetriever } from '@surrealdb/langchain/retrievers';
 import { SpectronStore } from '@surrealdb/langgraph/spectron_store';
 
@@ -13,15 +13,16 @@ if (!apiKey || !context || !endpoint) {
 	process.exit(1);
 }
 
-const spectronClient = new SpectronClient({ context, apiKey, endpoint });
+const spectronClient = new Spectron({ context, apiKey, endpoint });
 
 const spectronState = await spectronClient.state();
 console.log('spectron state keys:', Object.keys(spectronState ?? {}));
 
-const spectronHits = await spectronClient.knowledge.query(
-	'what does the team know about onboarding?',
-	{ mode: 'hybrid', k: 3 },
-);
+const spectronHits = await spectronClient.knowledge.query({
+	query: 'what does the team know about onboarding?',
+	mode: 'hybrid',
+	k: 3,
+});
 for (const hit of spectronHits.results) {
 	console.log(
 		`[${hit.score.toFixed(3)}] ${hit.document.title}: ${hit.chunk.text.slice(0, 80)}…`,

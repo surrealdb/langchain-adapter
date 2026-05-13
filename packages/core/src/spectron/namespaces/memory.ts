@@ -4,12 +4,7 @@ import type {
 	Entity,
 	EntityHistoryEntry,
 	ExtractionResult,
-	ForgetResult,
-	MemoryQueryResponse,
-	ProfileResponse,
-	ReflectionResult,
 	SessionInfo,
-	StructuredState,
 	TraceListResponse,
 	TraceRecord,
 	TraceStats,
@@ -23,49 +18,29 @@ function enduserBase(contextId: string): string {
 	return `/api/v1/${quotePath(contextId)}`;
 }
 
-function sessionCreatePayload(args: {
-	scope?: Record<string, string>;
-	metadata?: Record<string, unknown>;
-}): Record<string, unknown> {
-	const payload: Record<string, unknown> = {};
-	const scope = serialiseScope(args.scope);
-	if (scope !== undefined) payload.scope = scope;
-	if (args.metadata !== undefined) payload.metadata = { ...args.metadata };
-	return payload;
-}
-
-function turnPayload(role: TurnRole, content: string): Record<string, unknown> {
-	return { role, content };
-}
-
-function contextPayload(query: string, k?: number): Record<string, unknown> {
-	const p: Record<string, unknown> = { query };
-	if (k !== undefined) p.k = k;
-	return p;
-}
-
 export class Session {
 	private readonly base: string;
+	readonly id: string;
 
 	constructor(
 		private readonly transport: HttpTransport,
 		readonly contextId: string,
 		readonly info: SessionInfo,
 	) {
+		this.id = info.id;
 		this.base = `${enduserBase(contextId)}/sessions/${quotePath(info.id)}`;
-	}
-
-	get id(): string {
-		return this.info.id;
 	}
 
 	async close(): Promise<void> {
 		await this.transport.delete(this.base);
 	}
 
-	async turn(role: TurnRole, content: string): Promise<ExtractionResult> {
+	async turn(opts: {
+		role: TurnRole;
+		content: string;
+	}): Promise<ExtractionResult> {
 		const body = await this.transport.post(`${this.base}/turns`, {
-			json: turnPayload(role, content),
+			json: { role: opts.role, content: opts.content },
 		});
 		return body as ExtractionResult;
 	}
@@ -83,25 +58,24 @@ export class Session {
 		return Array.isArray(body) ? (body as Turn[]) : [];
 	}
 
-	async context(
-		query: string,
-		opts: { k?: number } = {},
-	): Promise<ContextResult> {
+	async context(opts: { query: string; k?: number }): Promise<ContextResult> {
+		const payload: Record<string, unknown> = { query: opts.query };
+		if (opts.k !== undefined) payload.k = opts.k;
 		const body = await this.transport.post(`${this.base}/context`, {
-			json: contextPayload(query, opts.k),
+			json: payload,
 		});
 		return body as ContextResult;
 	}
 
-	async chat(message: string): Promise<ChatReply> {
+	async chat(opts: { message: string }): Promise<ChatReply> {
 		const body = await this.transport.post(`${this.base}/chat`, {
-			json: { message },
+			json: { message: opts.message },
 		});
 		return body as ChatReply;
 	}
 }
 
-export class SessionsNamespace {
+export class Sessions {
 	private readonly base: string;
 
 	constructor(
@@ -112,25 +86,26 @@ export class SessionsNamespace {
 	}
 
 	async create(
-		args: {
+		opts: {
 			scope?: Record<string, string>;
 			metadata?: Record<string, unknown>;
 		} = {},
 	): Promise<Session> {
-		const body = await this.transport.post(this.base, {
-			json: sessionCreatePayload(args),
-		});
+		const payload: Record<string, unknown> = {};
+		const scope = serialiseScope(opts.scope);
+		if (scope !== undefined) payload.scope = scope;
+		if (opts.metadata !== undefined) payload.metadata = { ...opts.metadata };
+		const body = await this.transport.post(this.base, { json: payload });
 		if (!body || typeof body !== 'object' || Array.isArray(body)) {
 			throw new Error(
 				`Expected JSON object from session create, got ${body === null ? 'null' : typeof body}`,
 			);
 		}
-		const info = body as SessionInfo;
-		return new Session(this.transport, this.contextId, info);
+		return new Session(this.transport, this.contextId, body as SessionInfo);
 	}
 }
 
-export class EntitiesNamespace {
+export class Entities {
 	private readonly base: string;
 
 	constructor(
@@ -188,7 +163,7 @@ export class EntitiesNamespace {
 	}
 }
 
-export class LifecycleNamespace {
+export class Lifecycle {
 	private readonly base: string;
 
 	constructor(
@@ -207,7 +182,7 @@ export class LifecycleNamespace {
 	}
 }
 
-export class TracesNamespace {
+export class Traces {
 	private readonly base: string;
 
 	constructor(
@@ -241,75 +216,5 @@ export class TracesNamespace {
 	async stats(): Promise<TraceStats> {
 		const body = await this.transport.get(`${this.base}/stats`);
 		return body as TraceStats;
-	}
-}
-
-export class MemoryNamespace {
-	readonly sessions: SessionsNamespace;
-	readonly entities: EntitiesNamespace;
-	readonly lifecycle: LifecycleNamespace;
-	readonly traces: TracesNamespace;
-	private readonly base: string;
-
-	constructor(
-		private readonly transport: HttpTransport,
-		contextId: string,
-	) {
-		this.base = enduserBase(contextId);
-		this.sessions = new SessionsNamespace(transport, contextId);
-		this.entities = new EntitiesNamespace(transport, contextId);
-		this.lifecycle = new LifecycleNamespace(transport, contextId);
-		this.traces = new TracesNamespace(transport, contextId);
-	}
-
-	async query(
-		query: string,
-		opts: { k?: number; sessionId?: string } = {},
-	): Promise<MemoryQueryResponse> {
-		const payload: Record<string, unknown> = { query };
-		if (opts.k !== undefined) payload.k = opts.k;
-		if (opts.sessionId !== undefined) payload.sessionId = opts.sessionId;
-		const body = await this.transport.post(`${this.base}/query`, {
-			json: payload,
-		});
-		return body as MemoryQueryResponse;
-	}
-
-	async context(
-		query: string,
-		opts: { k?: number } = {},
-	): Promise<ContextResult> {
-		const body = await this.transport.post(`${this.base}/context`, {
-			json: contextPayload(query, opts.k),
-		});
-		return body as ContextResult;
-	}
-
-	async state(): Promise<StructuredState> {
-		const body = await this.transport.get(`${this.base}/state`);
-		return body as StructuredState;
-	}
-
-	async profile(): Promise<ProfileResponse> {
-		const body = await this.transport.get(`${this.base}/profile`);
-		return body as ProfileResponse;
-	}
-
-	async reflect(
-		query: string,
-		opts: { persist?: boolean } = {},
-	): Promise<ReflectionResult> {
-		const body = await this.transport.post(`${this.base}/reflect`, {
-			json: { query, persist: opts.persist ?? false },
-		});
-		return body as ReflectionResult;
-	}
-
-	async forget(query: string): Promise<ForgetResult> {
-		const body = await this.transport.post(`${this.base}/forget`, {
-			json: { query },
-		});
-		if (typeof body === 'number') return { deleted: body };
-		return body as ForgetResult;
 	}
 }

@@ -43,7 +43,8 @@ function uploadFields(args: {
 	return fields;
 }
 
-export interface QueryArgs {
+export interface QueryOptions {
+	query: string;
 	mode?: QueryMode;
 	k?: number;
 	threshold?: number;
@@ -56,27 +57,22 @@ export interface QueryArgs {
 	filter?: QueryFilter | Record<string, unknown>;
 }
 
-function buildQueryPayload(
-	query: string,
-	opts: QueryArgs,
-): Record<string, unknown> {
-	const payload: Record<string, unknown> = { query };
+function buildQueryPayload(opts: QueryOptions): Record<string, unknown> {
+	const payload: Record<string, unknown> = { query: opts.query };
 	if (opts.mode !== undefined) payload.mode = opts.mode;
 	if (opts.k !== undefined) payload.k = opts.k;
 	if (opts.threshold !== undefined) payload.threshold = opts.threshold;
-	if (opts.vectorWeight !== undefined)
-		payload.vectorWeight = opts.vectorWeight;
+	if (opts.vectorWeight !== undefined) payload.vectorWeight = opts.vectorWeight;
 	if (opts.rrfK !== undefined) payload.rrfK = opts.rrfK;
 	if (opts.graphAlpha !== undefined) payload.graphAlpha = opts.graphAlpha;
-	if (opts.graphEdges !== undefined)
-		payload.graphEdges = [...opts.graphEdges];
+	if (opts.graphEdges !== undefined) payload.graphEdges = [...opts.graphEdges];
 	if (opts.graphDepth !== undefined) payload.graphDepth = opts.graphDepth;
 	if (opts.expandGraph !== undefined) payload.expandGraph = opts.expandGraph;
 	if (opts.filter !== undefined) payload.filter = opts.filter;
 	return payload;
 }
 
-export interface TraverseArgs {
+export interface TraverseOptions {
 	start: TraverseStartJson[];
 	edges: string[];
 	direction?: string;
@@ -86,20 +82,20 @@ export interface TraverseArgs {
 	minScore?: number;
 }
 
-function buildTraversePayload(args: TraverseArgs): Record<string, unknown> {
+function buildTraversePayload(opts: TraverseOptions): Record<string, unknown> {
 	const payload: Record<string, unknown> = {
-		start: args.start.map((s) => ({ ...s })),
-		edges: [...args.edges],
+		start: opts.start.map((s) => ({ ...s })),
+		edges: [...opts.edges],
 	};
-	if (args.direction !== undefined) payload.direction = args.direction;
-	if (args.labels !== undefined) payload.labels = [...args.labels];
-	if (args.maxDepth !== undefined) payload.maxDepth = args.maxDepth;
-	if (args.limitPerHop !== undefined) payload.limitPerHop = args.limitPerHop;
-	if (args.minScore !== undefined) payload.minScore = args.minScore;
+	if (opts.direction !== undefined) payload.direction = opts.direction;
+	if (opts.labels !== undefined) payload.labels = [...opts.labels];
+	if (opts.maxDepth !== undefined) payload.maxDepth = opts.maxDepth;
+	if (opts.limitPerHop !== undefined) payload.limitPerHop = opts.limitPerHop;
+	if (opts.minScore !== undefined) payload.minScore = opts.minScore;
 	return payload;
 }
 
-export class KeywordsNamespace {
+export class KnowledgeKeywords {
 	private readonly base: string;
 
 	constructor(
@@ -130,11 +126,12 @@ export class KeywordsNamespace {
 		return body as KeywordPageJson;
 	}
 
-	async search(
-		query: string,
-		opts: { k?: number; threshold?: number } = {},
-	): Promise<KeywordSearchResponseJson> {
-		const payload: Record<string, unknown> = { query };
+	async search(opts: {
+		query: string;
+		k?: number;
+		threshold?: number;
+	}): Promise<KeywordSearchResponseJson> {
+		const payload: Record<string, unknown> = { query: opts.query };
 		if (opts.k !== undefined) payload.k = opts.k;
 		if (opts.threshold !== undefined) payload.threshold = opts.threshold;
 		const body = await this.transport.post(`${this.base}/search`, {
@@ -167,13 +164,13 @@ export class KeywordsNamespace {
 	}
 }
 
-export interface NodesUpsertArgs {
+export interface NodesUpsertOptions {
 	nodes: KnowledgeNodeUpsertRow[];
 	relations?: KnowledgeLinkUpsert[];
 	scope?: Record<string, string>;
 }
 
-export class NodesNamespace {
+export class KnowledgeNodes {
 	private readonly base: string;
 
 	constructor(
@@ -202,36 +199,33 @@ export class NodesNamespace {
 		return body as KnowledgeNodePageJson;
 	}
 
-	async upsert(args: NodesUpsertArgs): Promise<void> {
+	async upsert(opts: NodesUpsertOptions): Promise<void> {
 		const payload: Record<string, unknown> = {
-			nodes: args.nodes.map((n) => ({ ...n })),
+			nodes: opts.nodes.map((n) => ({ ...n })),
 		};
-		if (args.relations !== undefined) {
-			payload.relations = args.relations.map((r) => ({ ...r }));
+		if (opts.relations !== undefined) {
+			payload.relations = opts.relations.map((r) => ({ ...r }));
 		}
-		const scope = serialiseScope(args.scope);
+		const scope = serialiseScope(opts.scope);
 		if (scope !== undefined) payload.scope = scope;
 		await this.transport.post(`${this.base}/batch`, { json: payload });
 	}
 
-	async search(
-		query: string,
-		opts: {
-			k?: number;
-			threshold?: number;
-			rrfK?: number;
-			vectorWeight?: number;
-			kindFilter?: string;
-		} = {},
-	): Promise<KnowledgeNodeSearchResponseJson> {
+	async search(opts: {
+		query: string;
+		k?: number;
+		threshold?: number;
+		rrfK?: number;
+		vectorWeight?: number;
+		kindFilter?: string;
+	}): Promise<KnowledgeNodeSearchResponseJson> {
 		const payload: Record<string, unknown> = {
-			query,
+			query: opts.query,
 			k: opts.k ?? 10,
 			threshold: opts.threshold ?? 0.0,
 		};
 		if (opts.rrfK !== undefined) payload.rrfK = opts.rrfK;
-		if (opts.vectorWeight !== undefined)
-			payload.vectorWeight = opts.vectorWeight;
+		if (opts.vectorWeight !== undefined) payload.vectorWeight = opts.vectorWeight;
 		if (opts.kindFilter !== undefined) payload.kindFilter = opts.kindFilter;
 		const body = await this.transport.post(`${this.base}/search`, {
 			json: payload,
@@ -265,7 +259,7 @@ export class NodesNamespace {
 	}
 }
 
-export interface UploadArgs {
+export interface UploadOptions {
 	file: SpectronFileInput;
 	title?: string;
 	profile?: string;
@@ -274,9 +268,9 @@ export interface UploadArgs {
 	mimeType?: string;
 }
 
-export class KnowledgeNamespace {
-	readonly keywords: KeywordsNamespace;
-	readonly nodes: NodesNamespace;
+export class Knowledge {
+	readonly keywords: KnowledgeKeywords;
+	readonly nodes: KnowledgeNodes;
 	private readonly base: string;
 
 	constructor(
@@ -284,19 +278,19 @@ export class KnowledgeNamespace {
 		contextId: string,
 	) {
 		this.base = `${enduserBase(contextId)}/knowledge`;
-		this.keywords = new KeywordsNamespace(transport, contextId);
-		this.nodes = new NodesNamespace(transport, contextId);
+		this.keywords = new KnowledgeKeywords(transport, contextId);
+		this.nodes = new KnowledgeNodes(transport, contextId);
 	}
 
-	async upload(args: UploadArgs): Promise<UploadResponse> {
+	async upload(opts: UploadOptions): Promise<UploadResponse> {
 		const form = buildMultipart({
-			file: args.file,
-			filename: args.filename,
-			mimeType: args.mimeType,
+			file: opts.file,
+			filename: opts.filename,
+			mimeType: opts.mimeType,
 			fields: uploadFields({
-				title: args.title,
-				profile: args.profile,
-				scope: args.scope,
+				title: opts.title,
+				profile: opts.profile,
+				scope: opts.scope,
 			}),
 		});
 		const body = await this.transport.post(this.base, { body: form });
@@ -305,19 +299,17 @@ export class KnowledgeNamespace {
 
 	async replace(
 		documentId: string,
-		args: Omit<UploadArgs, 'scope'>,
+		opts: Omit<UploadOptions, 'scope'>,
 	): Promise<UploadResponse> {
 		const form = buildMultipart({
-			file: args.file,
-			filename: args.filename,
-			mimeType: args.mimeType,
-			fields: uploadFields({ title: args.title, profile: args.profile }),
+			file: opts.file,
+			filename: opts.filename,
+			mimeType: opts.mimeType,
+			fields: uploadFields({ title: opts.title, profile: opts.profile }),
 		});
 		const body = await this.transport.put(
 			`${this.base}/${quotePath(documentId)}`,
-			{
-				body: form,
-			},
+			{ body: form },
 		);
 		return (
 			(body as UploadResponse | null) ?? {
@@ -383,35 +375,32 @@ export class KnowledgeNamespace {
 		await this.transport.delete(`${this.base}/${quotePath(documentId)}`);
 	}
 
-	async query(
-		query: string,
-		opts: QueryArgs = {},
-	): Promise<QueryResponseJson> {
+	async query(opts: QueryOptions): Promise<QueryResponseJson> {
 		const body = await this.transport.post(`${this.base}/query`, {
-			json: buildQueryPayload(query, opts),
+			json: buildQueryPayload(opts),
 		});
 		return body as QueryResponseJson;
 	}
 
-	async traverse(args: TraverseArgs): Promise<TraverseApiResponse> {
+	async traverse(opts: TraverseOptions): Promise<TraverseApiResponse> {
 		const body = await this.transport.post(`${this.base}/traverse`, {
-			json: buildTraversePayload(args),
+			json: buildTraversePayload(opts),
 		});
 		return body as TraverseApiResponse;
 	}
 
-	async traverseRecursive(args: {
+	async traverseRecursive(opts: {
 		start: TraverseStartJson;
 		edge: string;
 		maxDepth?: number;
 		direction?: string;
 	}): Promise<TraverseApiResponse> {
 		const payload: Record<string, unknown> = {
-			start: { ...args.start },
-			edge: args.edge,
-			maxDepth: args.maxDepth ?? 3,
+			start: { ...opts.start },
+			edge: opts.edge,
+			maxDepth: opts.maxDepth ?? 3,
 		};
-		if (args.direction !== undefined) payload.direction = args.direction;
+		if (opts.direction !== undefined) payload.direction = opts.direction;
 		const body = await this.transport.post(
 			`${this.base}/traverse/recursive`,
 			{ json: payload },
@@ -419,16 +408,13 @@ export class KnowledgeNamespace {
 		return body as TraverseApiResponse;
 	}
 
-	async traverseSiblings(args: {
+	async traverseSiblings(opts: {
 		start: TraverseStartJson;
 		edge: string;
 	}): Promise<TraverseApiResponse> {
-		const body = await this.transport.post(
-			`${this.base}/traverse/siblings`,
-			{
-				json: { start: { ...args.start }, edge: args.edge },
-			},
-		);
+		const body = await this.transport.post(`${this.base}/traverse/siblings`, {
+			json: { start: { ...opts.start }, edge: opts.edge },
+		});
 		return body as TraverseApiResponse;
 	}
 }

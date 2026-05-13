@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SpectronClient } from '../spectron/client.js';
+import { Spectron } from '../spectron/client.js';
 
 interface CapturedCall {
 	url: string;
@@ -10,7 +10,7 @@ interface CapturedCall {
 
 function makeClient(
 	respond: (call: CapturedCall) => Response | Promise<Response>,
-): { client: SpectronClient; calls: CapturedCall[] } {
+): { client: Spectron; calls: CapturedCall[] } {
 	const calls: CapturedCall[] = [];
 	const fetchMock = vi.fn(
 		async (input: string | URL | Request, init?: RequestInit) => {
@@ -36,7 +36,7 @@ function makeClient(
 		},
 	);
 
-	const client = new SpectronClient({
+	const client = new Spectron({
 		context: 'ctx-1',
 		apiKey: 'sk-test',
 		endpoint: 'https://api.example.test',
@@ -53,12 +53,13 @@ function ok(body: unknown): Response {
 	});
 }
 
-describe('SpectronClient endpoint wiring', () => {
+describe('Spectron endpoint wiring', () => {
 	it('knowledge.query posts to /knowledge/query with full payload', async () => {
 		const { client, calls } = makeClient(() =>
 			ok({ queryMs: 12, results: [] }),
 		);
-		await client.knowledge.query('hello world', {
+		await client.knowledge.query({
+			query: 'hello world',
 			mode: 'hybrid_graph',
 			k: 5,
 			threshold: 0.5,
@@ -124,7 +125,7 @@ describe('SpectronClient endpoint wiring', () => {
 			if (c.url.includes('/state')) return ok({});
 			return ok(null);
 		});
-		const client = new SpectronClient({
+		const client = new Spectron({
 			context: 'acme prod',
 			apiKey: 'sk-test',
 			endpoint: 'https://api.example.test',
@@ -141,9 +142,9 @@ describe('SpectronClient endpoint wiring', () => {
 		void calls;
 	});
 
-	it('memory.query posts to /query', async () => {
+	it('query posts to /query', async () => {
 		const { client, calls } = makeClient(() => ok({ hits: [] }));
-		await client.memory.query('what role does tobie have?', { k: 5 });
+		await client.query({ query: 'what role does tobie have?', k: 5 });
 		expect(calls[0]!.url).toBe(
 			'https://api.example.test/api/v1/ctx-1/query',
 		);
@@ -153,7 +154,7 @@ describe('SpectronClient endpoint wiring', () => {
 		});
 	});
 
-	it('memory.state hits GET /state', async () => {
+	it('state hits GET /state', async () => {
 		const { client, calls } = makeClient(() => ok({}));
 		await client.state();
 		expect(calls[0]!.method).toBe('GET');
@@ -162,9 +163,9 @@ describe('SpectronClient endpoint wiring', () => {
 		);
 	});
 
-	it('memory.reflect posts query + persist', async () => {
+	it('reflect posts query + persist', async () => {
 		const { client, calls } = makeClient(() => ok({ reflection: 'ok' }));
-		await client.reflect('what is X?', { persist: true });
+		await client.reflect({ query: 'what is X?', persist: true });
 		expect(calls[0]!.url).toBe(
 			'https://api.example.test/api/v1/ctx-1/reflect',
 		);
@@ -182,7 +183,7 @@ describe('SpectronClient endpoint wiring', () => {
 			scope: { user: 'tobie' },
 		});
 		expect(session.id).toBe('sess:1');
-		await session.chat('hello');
+		await session.chat({ message: 'hello' });
 		expect(calls[1]!.url).toBe(
 			'https://api.example.test/api/v1/ctx-1/sessions/sess%3A1/chat',
 		);
@@ -205,7 +206,7 @@ describe('SpectronClient endpoint wiring', () => {
 	it('throws when endpoint is missing', () => {
 		expect(
 			() =>
-				new SpectronClient({
+				new Spectron({
 					context: 'x',
 					apiKey: 'sk-test',
 					// @ts-expect-error — endpoint is required at compile time; runtime check too
@@ -216,7 +217,7 @@ describe('SpectronClient endpoint wiring', () => {
 	});
 
 	it('exposes the supplied endpoint', () => {
-		const c = new SpectronClient({
+		const c = new Spectron({
 			context: 'x',
 			apiKey: 'sk-test',
 			endpoint: 'https://api.spectron.dev',

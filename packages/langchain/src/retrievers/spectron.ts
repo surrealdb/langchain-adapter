@@ -5,14 +5,14 @@ import {
 	type BaseRetrieverInput,
 } from '@langchain/core/retrievers';
 import {
-	SpectronClient,
+	Spectron,
 	type SpectronConfig,
 	type SpectronQueryMode,
 } from '@surrealdb/langchain-core';
 import type { QueryFilter } from '@surrealdb/langchain-core/spectron';
 
 export interface SpectronRetrieverArgs extends BaseRetrieverInput {
-	client: SpectronClient | SpectronConfig;
+	client: Spectron | SpectronConfig;
 	mode?: SpectronQueryMode;
 	k?: number;
 	threshold?: number;
@@ -33,7 +33,7 @@ export class SpectronRetriever extends BaseLangChainRetriever {
 		'spectron',
 	];
 
-	readonly client: SpectronClient;
+	readonly client: Spectron;
 	readonly mode: SpectronQueryMode;
 	readonly k: number;
 	readonly threshold?: number;
@@ -48,9 +48,9 @@ export class SpectronRetriever extends BaseLangChainRetriever {
 	constructor(args: SpectronRetrieverArgs) {
 		super(args);
 		this.client =
-			args.client instanceof SpectronClient
+			args.client instanceof Spectron
 				? args.client
-				: new SpectronClient(args.client);
+				: new Spectron(args.client);
 		this.mode = args.mode ?? 'hybrid';
 		this.k = args.k ?? 10;
 		this.threshold = args.threshold;
@@ -67,7 +67,8 @@ export class SpectronRetriever extends BaseLangChainRetriever {
 		query: string,
 		_runManager?: CallbackManagerForRetrieverRun,
 	): Promise<DocumentInterface[]> {
-		const response = await this.client.knowledge.query(query, {
+		const response = await this.client.knowledge.query({
+			query,
 			mode: this.mode,
 			k: this.k,
 			threshold: this.threshold,

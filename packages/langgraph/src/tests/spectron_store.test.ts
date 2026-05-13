@@ -1,4 +1,4 @@
-import { SpectronClient } from '@surrealdb/langchain-core';
+import { Spectron } from '@surrealdb/langchain-core';
 import { describe, expect, it, vi } from 'vitest';
 import { SpectronStore } from '../spectron_store.js';
 
@@ -14,7 +14,7 @@ function makeStore(handler: (url: string, init?: RequestInit) => Response) {
 		async (input: string | URL | Request, init?: RequestInit) =>
 			handler(String(input), init),
 	);
-	const client = new SpectronClient({
+	const client = new Spectron({
 		context: 'ctx',
 		apiKey: 'sk-test',
 		endpoint: 'https://api.example.test',
