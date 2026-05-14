@@ -59,8 +59,7 @@ import { Spectron } from '@surrealdb/langchain-core';
 const spectronClient = new Spectron({
 	context: 'acme-prod',
 	apiKey: process.env.SPECTRON_API_KEY!,
-	// endpoint defaults to 'https://spectron.surrealdb.com'; override only
-	// for SurrealDB-internal staging or dev.
+	// endpoint defaults to 'https://spectron.surrealdb.com'; override
 });
 ```
 
