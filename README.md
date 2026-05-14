@@ -72,14 +72,6 @@ const spectronClient = new Spectron({
 | `maxRetries`  | `3`              | GET-only retries on network errors and 5xx. Backoff schedule: `[250 ms, 500 ms, 1 s]`. Writes never retry.     |
 | `fetch`       | `globalThis.fetch` | Inject a custom `fetch` (mainly for tests).                                                                  |
 
-`endpoint` and `apiKey` are also mutable after construction. Changes apply to
-the next request:
-
-```ts
-spectronClient.endpoint = 'https://staging.spectron.example';
-spectronClient.apiKey = 'sk-rotated-…';
-```
-
 The full surface is also exported at the `@surrealdb/langchain-core/spectron`
 subpath, where every model type is unprefixed (the top-level package re-exports
 client, error and enum names with a `Spectron*` prefix to avoid clashes).
