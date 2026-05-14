@@ -26,7 +26,8 @@ import {
 export interface SpectronConfig {
 	context: string;
 	apiKey: string;
-	endpoint: string;
+	/** Defaults to `https://spectron.surrealdb.com`. Override for staging / dev. */
+	endpoint?: string;
 	timeout?: number;
 	maxRetries?: number;
 	fetch?: FetchLike;

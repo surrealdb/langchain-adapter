@@ -1,6 +1,7 @@
 import { errorFromResponse, SpectronError } from './errors.js';
 import { backoffSchedule, shouldRetry } from './retry.js';
 
+export const DEFAULT_ENDPOINT = 'https://spectron.surrealdb.com';
 export const DEFAULT_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_RETRIES = 3;
 const USER_AGENT = 'surrealdb-js-spectron/0.1';
@@ -9,7 +10,7 @@ export type FetchLike = typeof fetch;
 type FetchBody = NonNullable<Parameters<FetchLike>[1]>['body'];
 
 export interface HttpTransportConfig {
-	endpoint: string;
+	endpoint?: string;
 	apiKey: string;
 	timeout?: number;
 	maxRetries?: number;
@@ -85,12 +86,7 @@ export class HttpTransport {
 		if (!config.apiKey) {
 			throw new Error('Spectron API key is required. Pass apiKey=...');
 		}
-		if (!config.endpoint) {
-			throw new Error(
-				'Spectron endpoint is required. Pass `endpoint` (e.g. https://api.spectron.dev for production).',
-			);
-		}
-		this.endpoint = config.endpoint.replace(/\/+$/, '');
+		this.endpoint = (config.endpoint ?? DEFAULT_ENDPOINT).replace(/\/+$/, '');
 		this.apiKey = config.apiKey;
 		this.timeout = config.timeout ?? DEFAULT_TIMEOUT_MS;
 		this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;

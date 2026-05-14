@@ -17,7 +17,7 @@ Official SurrealDB integration for the [LangChain.js](https://js.langchain.com/)
 - **SurrealDB JS SDK**: v2.x
 - **Runtime**: Node.js ≥ 22 or Bun ≥ 1
 
-## Quick start
+## SurrealDB
 
 ```bash
 bun add @surrealdb/langchain @surrealdb/langgraph surrealdb
@@ -45,11 +45,11 @@ const hits = await store.similaritySearch('hi', 4);
 
 ## Spectron
 
-[Spectron](https://surrealdb.com) is SurrealDB's hosted agentic-memory
-service. A typed HTTP client and LangChain / LangGraph adapters ship with
-this monorepo. Spectron is independent of your SurrealDB instance — you can
-host SurrealDB yourself while using SurrealDB's managed Spectron, or point
-the client at staging, dev or a self-hosted deployment.
+[Spectron](https://surrealdb.com/platform/spectron) is SurrealDB's hosted agentic-memory service.
+A typed HTTP client and LangChain / LangGraph adapters ship with this monorepo,
+all pointed at `https://spectron.surrealdb.com` by default. The `endpoint` field
+is configurable for SurrealDB-internal staging and dev workflows, but production
+usage is the managed service hosted by SurrealDB.
 
 ### Install and configure
 
@@ -59,7 +59,8 @@ import { Spectron } from '@surrealdb/langchain-core';
 const spectronClient = new Spectron({
 	context: 'acme-prod',
 	apiKey: process.env.SPECTRON_API_KEY!,
-	endpoint: 'https://api.spectron.dev',
+	// endpoint defaults to 'https://spectron.surrealdb.com'; override only
+	// for SurrealDB-internal staging or dev.
 });
 ```
 
@@ -67,13 +68,13 @@ const spectronClient = new Spectron({
 | ------------- | ---------------- | -------------------------------------------------------------------------------------------------------------- |
 | `context`     | required         | Context id, e.g. `"acme-prod"`. Pins every request to `/api/v1/{context}/…`.                                   |
 | `apiKey`      | required         | Bearer token, sent as `Authorization: Bearer …`.                                                               |
-| `endpoint`    | **required**     | Spectron URL. Use `https://api.spectron.dev` for prod, or any staging / dev / self-host URL. **No default** — configured separately from your SurrealDB URL. |
+| `endpoint`    | `https://spectron.surrealdb.com` | Spectron URL. Defaults to the SurrealDB-hosted production service; override only for SurrealDB-internal staging or dev. |
 | `timeout`     | `30000` ms       | Per-request timeout (`AbortController`).                                                                       |
 | `maxRetries`  | `3`              | GET-only retries on network errors and 5xx. Backoff schedule: `[250 ms, 500 ms, 1 s]`. Writes never retry.     |
 | `fetch`       | `globalThis.fetch` | Inject a custom `fetch` (mainly for tests).                                                                  |
 
-`endpoint` and `apiKey` are also mutable after construction — changes apply
-to the next request:
+`endpoint` and `apiKey` are also mutable after construction. Changes apply to
+the next request:
 
 ```ts
 spectronClient.endpoint = 'https://staging.spectron.example';
@@ -82,7 +83,7 @@ spectronClient.apiKey = 'sk-rotated-…';
 
 The full surface is also exported at the `@surrealdb/langchain-core/spectron`
 subpath, where every model type is unprefixed (the top-level package re-exports
-client / error / enum names with a `Spectron*` prefix to avoid clashes).
+client, error and enum names with a `Spectron*` prefix to avoid clashes).
 
 ### Knowledge
 
@@ -106,7 +107,7 @@ await spectronClient.knowledge.delete(spectronDoc.id);
 ```
 
 `profile` is one of `text_only`, `text_plus_ocr`, `multimodal_balanced`,
-`multimodal_full`. Pass file bytes directly — string paths are intentionally
+`multimodal_full`. Pass file bytes directly; string paths are intentionally
 not supported in the JS client (read with `node:fs/promises.readFile` first).
 
 #### Query
@@ -200,7 +201,7 @@ const spectronSession = await spectronClient.sessions.create({ scope: { user: 't
 
 await spectronSession.turn({ role: 'user', content: 'I just got promoted to CTO' });
 
-const spectronContext = await spectronSession.context({ query: 'What is Tobie’s role?' });
+const spectronContext = await spectronSession.context({ query: "What is Tobie's role?" });
 const llmReply = await myLLM.chat({ system: spectronContext.context, user: userMessage });
 await spectronSession.turn({ role: 'assistant', content: llmReply });
 
@@ -253,7 +254,7 @@ await spectronClient.sessions.create({
 });
 ```
 
-If you need the raw conversion, `serialiseScope` / `deserialiseScope` are
+If you need the raw conversion, `serialiseScope` and `deserialiseScope` are
 exported from `@surrealdb/langchain-core/spectron`.
 
 ### Errors
@@ -292,7 +293,7 @@ Every error carries `status`, `title`, `detail`, `typeUri`, `instance`, and
 
 ### Retries and timeouts
 
-- `GET` retries on connection errors and 5xx: 250 ms, 500 ms, 1 s — up to
+- `GET` retries on connection errors and 5xx: 250 ms, 500 ms, 1 s, up to
   `maxRetries` (default `3`).
 - Writes never retry. Handle failure yourself.
 - Default timeout is 30 s. Override with `timeout` on the constructor, or per
@@ -301,7 +302,7 @@ Every error carries `status`, `title`, `detail`, `typeUri`, `instance`, and
 ### LangChain integrations
 
 `SpectronRetriever` translates `knowledge.query` hits into LangChain
-`Document`s, with chunk text as `pageContent` and document / chunk / score /
+`Document`s, with chunk text as `pageContent` and document, chunk, score and
 graph metadata in `metadata`:
 
 ```ts
@@ -334,9 +335,9 @@ instead of an instantiated client.
 
 ### LangGraph store
 
-`SpectronStore` is a `BaseStore` adapter — read paths delegate to Spectron,
-writes are not supported (Spectron writes flow through sessions / reflections,
-not raw key/value):
+`SpectronStore` is a `BaseStore` adapter. Read paths delegate to Spectron;
+writes are not supported (Spectron writes flow through sessions and
+reflections, not raw key/value):
 
 ```ts
 import { SpectronStore } from '@surrealdb/langgraph/spectron_store';
@@ -350,9 +351,9 @@ await spectronStore.search(['Person'], { query: 'who is tobie?', limit: 5 });  /
 | ----------------- | ---------------------- | ---------------------- |
 | `get`             | `entities.get`         | yes                    |
 | `search`          | `Spectron.query`       | yes (requires `query`) |
-| `put`             | —                      | throws                 |
-| `delete`          | —                      | throws                 |
-| `listNamespaces`  | —                      | throws                 |
+| `put`             | n/a                    | throws                 |
+| `delete`          | n/a                    | throws                 |
+| `listNamespaces`  | n/a                    | throws                 |
 
 The LangGraph `namespace: string[]` is flattened into Spectron's entity
 `type` with `"/"` by default; override with the `namespaceSeparator` arg.

@@ -203,26 +203,22 @@ describe('Spectron endpoint wiring', () => {
 		expect(calls[0]!.body).toEqual({});
 	});
 
-	it('throws when endpoint is missing', () => {
-		expect(
-			() =>
-				new Spectron({
-					context: 'x',
-					apiKey: 'sk-test',
-					// @ts-expect-error — endpoint is required at compile time; runtime check too
-					endpoint: undefined,
-					fetch: vi.fn() as unknown as typeof fetch,
-				}),
-		).toThrow(/endpoint is required/);
+	it('defaults endpoint to spectron.surrealdb.com when omitted', () => {
+		const c = new Spectron({
+			context: 'x',
+			apiKey: 'sk-test',
+			fetch: vi.fn() as unknown as typeof fetch,
+		});
+		expect(c.endpoint).toBe('https://spectron.surrealdb.com');
 	});
 
 	it('exposes the supplied endpoint', () => {
 		const c = new Spectron({
 			context: 'x',
 			apiKey: 'sk-test',
-			endpoint: 'https://api.spectron.dev',
+			endpoint: 'https://staging.spectron.example',
 			fetch: vi.fn() as unknown as typeof fetch,
 		});
-		expect(c.endpoint).toBe('https://api.spectron.dev');
+		expect(c.endpoint).toBe('https://staging.spectron.example');
 	});
 });

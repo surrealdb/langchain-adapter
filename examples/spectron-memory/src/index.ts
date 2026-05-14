@@ -1,19 +1,23 @@
-// Required env: SPECTRON_API_KEY, SPECTRON_CONTEXT, SPECTRON_ENDPOINT.
+// Required env: SPECTRON_API_KEY, SPECTRON_CONTEXT.
+// Optional: SPECTRON_ENDPOINT (defaults to https://spectron.surrealdb.com).
 import { Spectron } from '@surrealdb/langchain-core';
 import { SpectronRetriever } from '@surrealdb/langchain/retrievers';
 import { SpectronStore } from '@surrealdb/langgraph/spectron_store';
 
 const apiKey = process.env.SPECTRON_API_KEY;
 const context = process.env.SPECTRON_CONTEXT;
-const endpoint = process.env.SPECTRON_ENDPOINT;
-if (!apiKey || !context || !endpoint) {
+if (!apiKey || !context) {
 	console.error(
-		'Set SPECTRON_API_KEY, SPECTRON_CONTEXT and SPECTRON_ENDPOINT to run this example.',
+		'Set SPECTRON_API_KEY and SPECTRON_CONTEXT to run this example.',
 	);
 	process.exit(1);
 }
 
-const spectronClient = new Spectron({ context, apiKey, endpoint });
+const spectronClient = new Spectron({
+	context,
+	apiKey,
+	endpoint: process.env.SPECTRON_ENDPOINT,
+});
 
 const spectronState = await spectronClient.state();
 console.log('spectron state keys:', Object.keys(spectronState ?? {}));

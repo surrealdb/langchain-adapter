@@ -97,6 +97,7 @@ export {
 export {
 	type BuildMultipartArgs,
 	buildMultipart,
+	DEFAULT_ENDPOINT,
 	DEFAULT_MAX_RETRIES,
 	DEFAULT_TIMEOUT_MS,
 	type FetchLike,
