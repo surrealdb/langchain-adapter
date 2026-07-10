@@ -1,14 +1,14 @@
 import type { CallbackManagerForToolRun } from '@langchain/core/callbacks/manager';
 import { StructuredTool, type ToolParams } from '@langchain/core/tools';
-import { Spectron, type SpectronConfig } from '@surrealdb/langchain-core';
+import {
+	resolveSpectron,
+	type Spectron,
+	type SpectronClientConfig,
+} from '@surrealdb/langchain-core';
 import { z } from 'zod';
 
 interface ClientHolder {
-	client: Spectron | SpectronConfig;
-}
-
-function resolveClient(args: ClientHolder): Spectron {
-	return args.client instanceof Spectron ? args.client : new Spectron(args.client);
+	client: SpectronClientConfig;
 }
 
 const queryToolSchema = z.object({
@@ -43,7 +43,7 @@ export class SpectronQueryTool extends StructuredTool<typeof queryToolSchema> {
 
 	constructor(args: SpectronQueryToolArgs) {
 		super(args);
-		this.client = resolveClient(args);
+		this.client = resolveSpectron(args.client);
 		this.defaultK = args.defaultK ?? 10;
 		this.name = args.name ?? 'spectron_query';
 		this.description =
@@ -56,11 +56,11 @@ export class SpectronQueryTool extends StructuredTool<typeof queryToolSchema> {
 		input: z.infer<typeof queryToolSchema>,
 		_runManager?: CallbackManagerForToolRun,
 	): Promise<string> {
-		const response = await this.client.knowledge.query({
+		const response = await this.client.documents.query({
 			query: input.query,
 			mode: input.mode,
 			k: input.k ?? this.defaultK,
-			filter: input.filter,
+			filter: input.filter as never,
 		});
 		const compact = response.results.map((hit) => ({
 			text: hit.chunk.text,
@@ -100,7 +100,7 @@ export class SpectronReflectTool extends StructuredTool<
 
 	constructor(args: SpectronReflectToolArgs) {
 		super(args);
-		this.client = resolveClient(args);
+		this.client = resolveSpectron(args.client);
 		this.name = args.name ?? 'spectron_reflect';
 		this.description =
 			args.description ??
@@ -112,8 +112,7 @@ export class SpectronReflectTool extends StructuredTool<
 		input: z.infer<typeof reflectToolSchema>,
 		_runManager?: CallbackManagerForToolRun,
 	): Promise<string> {
-		const result = await this.client.reflect({
-			query: input.query,
+		const result = await this.client.reflect(input.query, {
 			persist: input.persist,
 		});
 		return JSON.stringify(result);

@@ -9,10 +9,14 @@ import {
 	type SearchItem,
 	type SearchOperation,
 } from '@langchain/langgraph-checkpoint';
-import { Spectron, type SpectronConfig } from '@surrealdb/langchain-core';
+import {
+	resolveSpectron,
+	type Spectron,
+	type SpectronClientConfig,
+} from '@surrealdb/langchain-core';
 
 export interface SpectronStoreArgs {
-	spectron: Spectron | SpectronConfig;
+	spectron: SpectronClientConfig;
 	namespaceSeparator?: string;
 }
 
@@ -43,10 +47,7 @@ export class SpectronStore extends BaseLangGraphStore {
 
 	constructor(args: SpectronStoreArgs) {
 		super();
-		this.client =
-			args.spectron instanceof Spectron
-				? args.spectron
-				: new Spectron(args.spectron);
+		this.client = resolveSpectron(args.spectron);
 		this.namespaceSeparator = args.namespaceSeparator ?? '/';
 	}
 
@@ -94,13 +95,16 @@ export class SpectronStore extends BaseLangGraphStore {
 	private async handleGet(op: GetOperation): Promise<Item | null> {
 		const type = this.toEntityType(op.namespace);
 		try {
-			const entity = await this.client.entities.get(type, op.key);
+			const resp = await this.client.entities.get(type, op.key);
+			const value = Object.fromEntries(
+				resp.attributes.map((attr) => [attr.key, attr.value]),
+			);
 			return {
-				namespace: this.fromEntityType(entity.type),
-				key: entity.name,
-				value: entity.attributes ?? {},
-				createdAt: parseDate(entity.createdAt),
-				updatedAt: parseDate(entity.updatedAt),
+				namespace: this.fromEntityType(resp.entity.entityType),
+				key: resp.entity.name,
+				value,
+				createdAt: parseDate(resp.entity.createdAt),
+				updatedAt: parseDate(resp.entity.updatedAt),
 			};
 		} catch (err) {
 			if (
@@ -121,8 +125,7 @@ export class SpectronStore extends BaseLangGraphStore {
 				'SpectronStore.search requires a `query` string — Spectron only supports semantic queries via Spectron.query.',
 			);
 		}
-		const response = await this.client.query({
-			query: op.query,
+		const response = await this.client.recall(op.query, {
 			k: op.limit,
 		});
 		const namespace = op.namespacePrefix;
@@ -133,7 +136,6 @@ export class SpectronStore extends BaseLangGraphStore {
 			value: {
 				text: hit.text ?? '',
 				source: hit.source,
-				...(hit.metadata ?? {}),
 			},
 			createdAt: now,
 			updatedAt: now,

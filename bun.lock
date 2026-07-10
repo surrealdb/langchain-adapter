@@ -61,6 +61,7 @@
       "name": "@surrealdb/langchain-core",
       "version": "0.1.0",
       "dependencies": {
+        "@surrealdb/spectron": "^1.0.0-alpha.5",
         "surrealdb": "^2.0.3",
       },
       "devDependencies": {
@@ -263,6 +264,8 @@
     "@surrealdb/langchain-core": ["@surrealdb/langchain-core@workspace:packages/core"],
 
     "@surrealdb/langgraph": ["@surrealdb/langgraph@workspace:packages/langgraph"],
+
+    "@surrealdb/spectron": ["@surrealdb/spectron@1.0.0-alpha.5", "", { "peerDependencies": { "typescript": "^5.0.0 || ^6.0.0" } }, "sha512-HYW//1SmsmToIodssfFpsMlSTMgfmtCFdZWTKBm3XDA4bjbAX2QjAxw84JW6VDSGUFhEjiRUcPGGigSf0tqOSw=="],
 
     "@types/chai": ["@types/chai@5.2.3", "", { "dependencies": { "@types/deep-eql": "*", "assertion-error": "^2.0.1" } }, "sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA=="],
 

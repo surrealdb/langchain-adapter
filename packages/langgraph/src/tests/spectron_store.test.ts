@@ -1,48 +1,68 @@
-import { Spectron } from '@surrealdb/langchain-core';
+import { Spectron, SpectronNotFoundError } from '@surrealdb/langchain-core';
 import { describe, expect, it, vi } from 'vitest';
 import { SpectronStore } from '../spectron_store.js';
 
-function jsonResponse(body: unknown, status = 200): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { 'content-type': 'application/json' },
-	});
-}
-
-function makeStore(handler: (url: string, init?: RequestInit) => Response) {
-	const fetchMock = vi.fn(
-		async (input: string | URL | Request, init?: RequestInit) =>
-			handler(String(input), init),
-	);
+// Builds a real Spectron (so `instanceof` passes) with the methods the store
+// calls stubbed out — no network, no `fetchImpl`.
+function makeStore(overrides: {
+	entitiesGet?: (type: string, name: string) => unknown;
+	recall?: (query: string, opts?: unknown) => unknown;
+}) {
 	const client = new Spectron({
 		context: 'ctx',
 		apiKey: 'sk-test',
 		endpoint: 'https://api.example.test',
-		fetch: fetchMock as unknown as typeof fetch,
-		maxRetries: 0,
 	});
-	return { store: new SpectronStore({ spectron: client }), fetchMock };
+	const recall = vi.fn(overrides.recall ?? (() => ({ hits: [] })));
+	if (overrides.entitiesGet) {
+		(client.entities as unknown as { get: unknown }).get = vi.fn(
+			overrides.entitiesGet,
+		);
+	}
+	(client as unknown as { recall: unknown }).recall = recall;
+	return { store: new SpectronStore({ spectron: client }), recall };
 }
 
 describe('SpectronStore', () => {
 	it('get returns null on 404', async () => {
-		const { store } = makeStore(() =>
-			jsonResponse({ title: 'not found' }, 404),
-		);
+		const { store } = makeStore({
+			entitiesGet: () => {
+				throw new SpectronNotFoundError({
+					status: 404,
+					title: 'not found',
+				});
+			},
+		});
 		const result = await store.get(['Person'], 'tobie');
 		expect(result).toBeNull();
 	});
 
 	it('get maps entity to Item', async () => {
-		const { store } = makeStore(() =>
-			jsonResponse({
-				type: 'Person',
-				name: 'tobie',
-				attributes: { role: 'CTO' },
-				createdAt: '2024-01-01T00:00:00Z',
-				updatedAt: '2024-01-02T00:00:00Z',
+		const { store } = makeStore({
+			entitiesGet: () => ({
+				entity: {
+					id: 'entity:1',
+					entityType: 'Person',
+					name: 'tobie',
+					importance: 1,
+					memoryCategory: 'identity',
+					createdAt: '2024-01-01T00:00:00Z',
+					updatedAt: '2024-01-02T00:00:00Z',
+				},
+				attributes: [
+					{
+						id: 'attr:1',
+						entity: 'entity:1',
+						key: 'role',
+						value: 'CTO',
+						importance: 1,
+						memoryCategory: 'identity',
+						createdAt: '2024-01-01T00:00:00Z',
+					},
+				],
+				relations: [],
 			}),
-		);
+		});
 		const item = await store.get(['Person'], 'tobie');
 		expect(item).not.toBeNull();
 		expect(item?.key).toBe('tobie');
@@ -51,25 +71,27 @@ describe('SpectronStore', () => {
 		expect(item?.updatedAt.toISOString()).toBe('2024-01-02T00:00:00.000Z');
 	});
 
-	it('search calls /query and maps hits to SearchItem[]', async () => {
-		const { store, fetchMock } = makeStore((url) => {
-			expect(url).toBe('https://api.example.test/api/v1/ctx/query');
-			return jsonResponse({
-				hits: [
-					{
-						id: 'mem:1',
-						source: 'memory',
-						score: 0.9,
-						text: 'tobie is CTO',
-					},
-					{
-						id: 'mem:2',
-						source: 'memory',
-						score: 0.7,
-						text: 'background',
-					},
-				],
-			});
+	it('search calls recall and maps hits to SearchItem[]', async () => {
+		const { store, recall } = makeStore({
+			recall: (query: string) => {
+				expect(query).toBe('who is tobie?');
+				return {
+					hits: [
+						{
+							id: 'mem:1',
+							source: 'memory',
+							score: 0.9,
+							text: 'tobie is CTO',
+						},
+						{
+							id: 'mem:2',
+							source: 'memory',
+							score: 0.7,
+							text: 'background',
+						},
+					],
+				};
+			},
 		});
 		const items = await store.search(['Person'], {
 			query: 'who is tobie?',
@@ -80,25 +102,25 @@ describe('SpectronStore', () => {
 		expect(items[0]!.key).toBe('mem:1');
 		expect(items[0]!.namespace).toEqual(['Person']);
 		expect((items[0]!.value as { text: string }).text).toBe('tobie is CTO');
-		expect(fetchMock).toHaveBeenCalledOnce();
+		expect(recall).toHaveBeenCalledOnce();
 	});
 
 	it('search throws when no query is provided', async () => {
-		const { store } = makeStore(() => jsonResponse({}));
+		const { store } = makeStore({});
 		await expect(store.search(['Person'])).rejects.toThrow(
 			/requires a `query`/,
 		);
 	});
 
 	it('put throws a clear unsupported error', async () => {
-		const { store } = makeStore(() => jsonResponse({}));
+		const { store } = makeStore({});
 		await expect(
 			store.put(['Person'], 'tobie', { role: 'CTO' }),
 		).rejects.toThrow(/does not support put/);
 	});
 
 	it('listNamespaces throws', async () => {
-		const { store } = makeStore(() => jsonResponse({}));
+		const { store } = makeStore({});
 		await expect(store.listNamespaces()).rejects.toThrow(/listNamespaces/);
 	});
 });

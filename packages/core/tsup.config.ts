@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
 	entry: {
 		index: 'src/index.ts',
-		spectron: 'src/spectron/index.ts',
+		spectron: 'src/spectron.ts',
 	},
 	format: ['esm', 'cjs'],
 	dts: true,
@@ -11,5 +11,5 @@ export default defineConfig({
 	clean: true,
 	treeshake: true,
 	splitting: false,
-	external: ['surrealdb'],
+	external: ['surrealdb', '@surrealdb/spectron'],
 });

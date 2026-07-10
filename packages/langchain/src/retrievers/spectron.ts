@@ -5,24 +5,23 @@ import {
 	type BaseRetrieverInput,
 } from '@langchain/core/retrievers';
 import {
-	Spectron,
-	type SpectronConfig,
+	resolveSpectron,
+	type Spectron,
+	type SpectronClientConfig,
 	type SpectronQueryMode,
 } from '@surrealdb/langchain-core';
-import type { QueryFilter } from '@surrealdb/langchain-core/spectron';
 
 export interface SpectronRetrieverArgs extends BaseRetrieverInput {
-	client: Spectron | SpectronConfig;
+	client: SpectronClientConfig;
 	mode?: SpectronQueryMode;
 	k?: number;
 	threshold?: number;
-	vectorWeight?: number;
 	rrfK?: number;
 	graphAlpha?: number;
 	graphEdges?: string[];
 	graphDepth?: number;
 	expandGraph?: boolean;
-	filter?: QueryFilter | Record<string, unknown>;
+	filter?: Record<string, unknown>;
 }
 
 export class SpectronRetriever extends BaseLangChainRetriever {
@@ -37,24 +36,19 @@ export class SpectronRetriever extends BaseLangChainRetriever {
 	readonly mode: SpectronQueryMode;
 	readonly k: number;
 	readonly threshold?: number;
-	readonly vectorWeight?: number;
 	readonly rrfK?: number;
 	readonly graphAlpha?: number;
 	readonly graphEdges?: string[];
 	readonly graphDepth?: number;
 	readonly expandGraph?: boolean;
-	readonly filter?: QueryFilter | Record<string, unknown>;
+	readonly filter?: Record<string, unknown>;
 
 	constructor(args: SpectronRetrieverArgs) {
 		super(args);
-		this.client =
-			args.client instanceof Spectron
-				? args.client
-				: new Spectron(args.client);
+		this.client = resolveSpectron(args.client);
 		this.mode = args.mode ?? 'hybrid';
 		this.k = args.k ?? 10;
 		this.threshold = args.threshold;
-		this.vectorWeight = args.vectorWeight;
 		this.rrfK = args.rrfK;
 		this.graphAlpha = args.graphAlpha;
 		this.graphEdges = args.graphEdges;
@@ -67,18 +61,17 @@ export class SpectronRetriever extends BaseLangChainRetriever {
 		query: string,
 		_runManager?: CallbackManagerForRetrieverRun,
 	): Promise<DocumentInterface[]> {
-		const response = await this.client.knowledge.query({
+		const response = await this.client.documents.query({
 			query,
 			mode: this.mode,
 			k: this.k,
 			threshold: this.threshold,
-			vectorWeight: this.vectorWeight,
 			rrfK: this.rrfK,
 			graphAlpha: this.graphAlpha,
-			graphEdges: this.graphEdges,
+			graphEdges: this.graphEdges as never,
 			graphDepth: this.graphDepth,
 			expandGraph: this.expandGraph,
-			filter: this.filter,
+			filter: this.filter as never,
 		});
 
 		return response.results.map(

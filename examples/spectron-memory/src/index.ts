@@ -1,28 +1,22 @@
-// Required env: SPECTRON_API_KEY, SPECTRON_CONTEXT.
-// Optional: SPECTRON_ENDPOINT (defaults to https://spectron.surrealdb.com).
-import { Spectron } from '@surrealdb/langchain-core';
+// Required env: SPECTRON_ENDPOINT, SPECTRON_API_KEY, SPECTRON_CONTEXT.
+
 import { SpectronRetriever } from '@surrealdb/langchain/retrievers';
+import { resolveSpectron } from '@surrealdb/langchain-core';
 import { SpectronStore } from '@surrealdb/langgraph/spectron_store';
 
-const apiKey = process.env.SPECTRON_API_KEY;
-const context = process.env.SPECTRON_CONTEXT;
-if (!apiKey || !context) {
-	console.error(
-		'Set SPECTRON_API_KEY and SPECTRON_CONTEXT to run this example.',
-	);
+let spectronClient: ReturnType<typeof resolveSpectron>;
+try {
+	// Reads SPECTRON_ENDPOINT / SPECTRON_API_KEY / SPECTRON_CONTEXT from the env.
+	spectronClient = resolveSpectron({});
+} catch (err) {
+	console.error((err as Error).message);
 	process.exit(1);
 }
-
-const spectronClient = new Spectron({
-	context,
-	apiKey,
-	endpoint: process.env.SPECTRON_ENDPOINT,
-});
 
 const spectronState = await spectronClient.state();
 console.log('spectron state keys:', Object.keys(spectronState ?? {}));
 
-const spectronHits = await spectronClient.knowledge.query({
+const spectronHits = await spectronClient.documents.query({
 	query: 'what does the team know about onboarding?',
 	mode: 'hybrid',
 	k: 3,

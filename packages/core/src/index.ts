@@ -1,3 +1,22 @@
+export type {
+	DocumentStatus as SpectronDocumentStatus,
+	MemoryCategory as SpectronMemoryCategory,
+	QueryMode as SpectronQueryMode,
+	SpectronOptions,
+	SpectronOptions as SpectronConfig,
+	TurnRole as SpectronTurnRole,
+} from '@surrealdb/spectron';
+export {
+	AuthError as SpectronAuthError,
+	ConnectionError as SpectronConnectionError,
+	NotFoundError as SpectronNotFoundError,
+	RateLimitError as SpectronRateLimitError,
+	ScopeError as SpectronScopeError,
+	ServerError as SpectronServerError,
+	Spectron,
+	SpectronError,
+	ValidationError as SpectronValidationError,
+} from '@surrealdb/spectron';
 export {
 	RecordId,
 	SurrealDBClient,
@@ -25,21 +44,6 @@ export {
 	type VectorIndexType,
 } from './schema.js';
 export {
-	AuthError as SpectronAuthError,
-	NotFoundError as SpectronNotFoundError,
-	RateLimitError as SpectronRateLimitError,
-	ScopeError as SpectronScopeError,
-	ServerError as SpectronServerError,
-	Spectron,
-	SpectronClient,
-	type SpectronConfig,
-	SpectronError,
-	ValidationError as SpectronValidationError,
-} from './spectron/index.js';
-export type {
-	DocumentStatus as SpectronDocumentStatus,
-	IngestProfile as SpectronIngestProfile,
-	MemoryCategory as SpectronMemoryCategory,
-	QueryMode as SpectronQueryMode,
-	TurnRole as SpectronTurnRole,
-} from './spectron/models.js';
+	resolveSpectron,
+	type SpectronClientConfig,
+} from './spectron_helpers.js';
