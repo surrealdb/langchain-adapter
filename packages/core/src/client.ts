@@ -39,6 +39,16 @@ export class SurrealDBClient {
 		} else if (isTokenConfig(this.config)) {
 			await this.db.connect(this.config.url);
 			await this.db.authenticate(this.config.token);
+		} else {
+			// Falling through used to leave the client marked connected but
+			// unauthenticated, so the first query failed somewhere far from
+			// the cause.
+			const keys = Object.keys(this.config ?? {});
+			throw new Error(
+				`SurrealDBClient: unusable connection config. Expected ` +
+					`{ url, username, password } or { url, token }, but got ` +
+					`{ ${keys.join(', ')} }.`,
+			);
 		}
 
 		await this.db.use({
@@ -130,4 +140,19 @@ export class SurrealDBClient {
 			);
 		}
 	}
+}
+
+/**
+ * Accept either a shared client or the config to build one, and report which
+ * it was — an owned client is the caller's to close, a passed-in one is not.
+ *
+ * Every adapter in these packages takes `surreal: SurrealDBClient |
+ * SurrealDBStoreConfig`, so this is the one place that distinction is made.
+ */
+export function resolveClient(
+	surreal: SurrealDBClient | SurrealDBStoreConfig,
+): { client: SurrealDBClient; owned: boolean } {
+	return surreal instanceof SurrealDBClient
+		? { client: surreal, owned: false }
+		: { client: new SurrealDBClient(surreal), owned: true };
 }

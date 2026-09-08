@@ -1,10 +1,10 @@
 import { Document } from '@langchain/core/documents';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { VectorStore } from '@surrealdb/langchain';
+import { SurrealDBVectorStore } from '@surrealdb/langchain';
 
 const embeddings = new OpenAIEmbeddings({ model: 'text-embedding-3-small' });
 
-const store = await VectorStore.initialize(embeddings, {
+const store = await SurrealDBVectorStore.initialize(embeddings, {
 	surreal: {
 		url: process.env.SURREALDB_URL ?? 'ws://localhost:8000',
 		username: process.env.SURREALDB_USER ?? 'root',

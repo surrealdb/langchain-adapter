@@ -5,15 +5,15 @@ import {
 	type BaseRetrieverInput,
 } from '@langchain/core/retrievers';
 import {
-	resolveSpectron,
-	type Spectron,
-	type SpectronClientConfig,
-	type SpectronQueryMode,
+	resolveAgentMemory,
+	type AgentMemory,
+	type AgentMemoryClientConfig,
+	type AgentMemoryQueryMode,
 } from '@surrealdb/langchain-core';
 
-export interface SpectronRetrieverArgs extends BaseRetrieverInput {
-	client: SpectronClientConfig;
-	mode?: SpectronQueryMode;
+export interface AgentMemoryRetrieverArgs extends BaseRetrieverInput {
+	client: AgentMemoryClientConfig;
+	mode?: AgentMemoryQueryMode;
 	k?: number;
 	threshold?: number;
 	rrfK?: number;
@@ -24,16 +24,16 @@ export interface SpectronRetrieverArgs extends BaseRetrieverInput {
 	filter?: Record<string, unknown>;
 }
 
-export class SpectronRetriever extends BaseLangChainRetriever {
+export class AgentMemoryRetriever extends BaseLangChainRetriever {
 	override lc_namespace = [
 		'langchain',
 		'retrievers',
 		'surrealdb',
-		'spectron',
+		'agent_memory',
 	];
 
-	readonly client: Spectron;
-	readonly mode: SpectronQueryMode;
+	readonly client: AgentMemory;
+	readonly mode: AgentMemoryQueryMode;
 	readonly k: number;
 	readonly threshold?: number;
 	readonly rrfK?: number;
@@ -43,9 +43,9 @@ export class SpectronRetriever extends BaseLangChainRetriever {
 	readonly expandGraph?: boolean;
 	readonly filter?: Record<string, unknown>;
 
-	constructor(args: SpectronRetrieverArgs) {
+	constructor(args: AgentMemoryRetrieverArgs) {
 		super(args);
-		this.client = resolveSpectron(args.client);
+		this.client = resolveAgentMemory(args.client);
 		this.mode = args.mode ?? 'hybrid';
 		this.k = args.k ?? 10;
 		this.threshold = args.threshold;

@@ -1,33 +1,41 @@
 # SurrealDB for LangChain and LangGraph
 
-Official SurrealDB integration for the [LangChain.js](https://js.langchain.com/) and
-[LangGraph.js](https://langchain-ai.github.io/langgraphjs/) ecosystems.
+Official SurrealDB integrations for [LangChain.js](https://js.langchain.com/) and
+[LangGraph.js](https://langchain-ai.github.io/langgraphjs/), plus adapters for
+[SurrealDB Agent Memory](https://surrealdb.com/agent-memory).
 
 ## Packages
 
 | Package | Description |
 | --- | --- |
-| [`@surrealdb/langchain-core`](./packages/core) | Shared SurrealDB client, config, schema, filter helpers and Spectron HTTP client |
-| [`@surrealdb/langchain`](./packages/langchain) | `VectorStore`, hybrid `Retriever`, `SpectronRetriever`, agent `Tool`s (incl. Spectron), persisting `ChatModel` wrapper |
-| [`@surrealdb/langgraph`](./packages/langgraph) | LangGraph `BaseCheckpointSaver`, `BaseStore`, and Spectron-backed `SpectronStore` |
+| [`@surrealdb/langchain-core`](./packages/core) | Shared SurrealDB client, config, schema, filter and record helpers, plus the Agent Memory client |
+| [`@surrealdb/langchain`](./packages/langchain) | Vector store, retrievers, tools, chat model, record manager, LLM cache, chat history, callback handler |
+| [`@surrealdb/langgraph`](./packages/langgraph) | Checkpoint saver, store, node cache, and an Agent Memory-backed store |
 
 ## Requirements
 
-- **SurrealDB server**: v3.x (uses HNSW vector indexes, `bytes` type, `<|k,dist|>` kNN operator)
-- **SurrealDB JS SDK**: v2.x
+- **SurrealDB server**: v3.x (HNSW/DISKANN vector indexes, `bytes` type, the `<|k,ef|>` kNN operator)
+- **LangChain**: `@langchain/core` **v1** (`^1.2.9`) — v0.3 is not supported
+- **LangGraph**: `@langchain/langgraph-checkpoint` `^1.1.5`
+- **SurrealDB JS SDK**: v2.x · **zod**: `^3.25.76 || ^4`
 - **Runtime**: Node.js ≥ 22 or Bun ≥ 1
-
-## SurrealDB
 
 ```bash
 bun add @surrealdb/langchain @surrealdb/langgraph surrealdb
 ```
 
+Upgrading from 0.1.x? See [Migrating from 0.1.x](#migrating-from-01x) — 0.2.0 renames
+every Agent Memory symbol and several bare exports.
+
+---
+
+## Vector store
+
 ```ts
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { VectorStore } from '@surrealdb/langchain';
+import { SurrealDBVectorStore } from '@surrealdb/langchain';
 
-const store = await VectorStore.initialize(new OpenAIEmbeddings(), {
+const store = await SurrealDBVectorStore.initialize(new OpenAIEmbeddings(), {
 	surreal: {
 		url: 'ws://localhost:8000',
 		username: 'root',
@@ -43,293 +51,429 @@ await store.addDocuments([{ pageContent: 'hello world', metadata: {} }]);
 const hits = await store.similaritySearch('hi', 4);
 ```
 
-## Spectron
-
-[Spectron](https://surrealdb.com/platform/spectron) is SurrealDB's hosted agentic-memory service.
-The LangChain / LangGraph adapters wrap the official
-[`@surrealdb/spectron`](https://www.npmjs.com/package/@surrealdb/spectron)
-client, which `@surrealdb/langchain-core` re-exports. `endpoint`, `apiKey`, and
-`context` are all required — there is no implicit default host.
-
-### Install and configure
+Searches use SurrealDB's kNN operator against the vector index. A metadata filter is
+pushed *into* the index traversal rather than applied afterwards, so a filtered search
+still returns a full `k`:
 
 ```ts
-import { Spectron } from '@surrealdb/langchain-core';
-
-const spectronClient = new Spectron({
-	context: 'acme-prod',
-	apiKey: process.env.SPECTRON_API_KEY!,
-	endpoint: process.env.SPECTRON_ENDPOINT!,
-});
+await store.similaritySearch('hi', 4, { topic: 'onboarding' });
 ```
 
-Or let the adapters resolve a client from the environment with the
-`resolveSpectron` helper — it reads `SPECTRON_ENDPOINT`, `SPECTRON_API_KEY`,
-and `SPECTRON_CONTEXT`, throwing a clear error if any is missing, and passes a
-pre-constructed `Spectron` through untouched:
+**Scores are similarities — higher is better.** Cosine returns `1 - distance`; the
+unbounded metrics are mapped to `1 / (1 + distance)`, which stays in `(0, 1]` and
+preserves ordering. Pass `scoreMode: 'distance'` for the raw distance.
+
+**Maximal marginal relevance** trades some relevance for diversity, and also powers
+`asRetriever({ searchType: 'mmr' })`:
 
 ```ts
-import { resolveSpectron } from '@surrealdb/langchain-core';
-
-const spectronClient = resolveSpectron({}); // all three from env
+await store.maxMarginalRelevanceSearch('hi', { k: 4, fetchK: 20, lambda: 0.5 });
 ```
 
-| Field         | Default            | Notes                                                                                                      |
-| ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `context`     | required           | Context id, e.g. `"acme-prod"`. Pins every request to `/api/v1/{context}/…`.                               |
-| `apiKey`      | required           | Bearer token, sent as `Authorization: Bearer …`.                                                           |
-| `endpoint`    | required           | Spectron API origin (no trailing slash), e.g. `https://spectron.surrealdb.com`.                            |
-| `timeout`     | `30000` ms         | Per-request timeout (`AbortController`).                                                                    |
-| `maxRetries`  | `3`                | GET-only retries on network errors and 5xx. Writes never retry.                                            |
-| `fetchImpl`   | `globalThis.fetch` | Inject a custom `fetch` (mainly for tests).                                                                 |
+### The id contract
 
-The full client surface is also re-exported at the
-`@surrealdb/langchain-core/spectron` subpath (a pass-through of
-`@surrealdb/spectron`, with model types unprefixed). The top-level package
-re-exports the client, error and enum names with a `Spectron*` prefix to avoid
-clashes.
-
-### Documents
+Ids go in and come back unchanged, and the ids you get are the ids `delete` accepts:
 
 ```ts
-const spectronDoc = await spectronClient.documents.upload({
-	file: pdfBytes,           // File | Blob | Uint8Array | ArrayBuffer | ArrayBufferView | ReadableStream
-	contentType: 'application/pdf',
-	filename: 'returns.pdf',
-	title: 'Returns Policy',
-	source: 'handbook',
-	scopes: [['org:anneal']], // DNF scope selector (outer OR, inner AND)
-	labels: ['team=support'],
-});
-
-await spectronClient.documents.get(spectronDoc.id);
-await spectronClient.documents.reprocess(spectronDoc.id, { file: newPdfBytes });
-await spectronClient.documents.raw(spectronDoc.id);              // → ArrayBuffer
-await spectronClient.documents.chunks(spectronDoc.id, { page: 0, pageSize: 50 });
-await spectronClient.documents.list({ status: 'ready', mimeType: 'application/pdf' });
-await spectronClient.documents.delete(spectronDoc.id);
-await spectronClient.documents.recomputeLinks();
+const ids = await store.addDocuments(docs, { ids: ['a', 'has space'] });
+// → ['a', 'has space']
+await store.delete({ ids });
 ```
 
-Pass file bytes directly; string paths are intentionally not supported in the
-JS client (read with `node:fs/promises.readFile` first).
+Ids are stored as SurrealDB record ids, so no escaping is needed and none leaks into
+what you get back. A table whose existing id parts are not strings (numbers, arrays,
+objects) returns the fully-qualified `table:id` form; `delete({ ids })` rejects those
+rather than guessing, so use `delete({ filter })` there.
 
-#### Query
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `tableName` | `documents` | |
+| `contentField` / `metadataField` / `vectorField` | `content` / `metadata` / `embedding` | |
+| `dimensions` | required | Must match your embedding model |
+| `distanceStrategy` | `cosine` | `cosine`, `euclidean`, `manhattan`, `hamming` |
+| `indexType` | `hnsw` | `hnsw`, `diskann` (SurrealDB ≥ 3.1), or `none` for brute force |
+| `hnswOptions` / `diskannOptions` | `{ m: 12, efc: 100 }` | Index build parameters |
+| `ef` | `40` | Search breadth |
+| `scoreMode` | `similarity` | Or `distance` for the 0.1.x behaviour |
+| `skipInitSchema` / `skipVersionCheck` | `false` | For externally-managed schemas |
+
+## Retrievers
+
+`HybridRetriever` seeds from a vector search and re-ranks by distance:
 
 ```ts
-import type { SpectronQueryMode } from '@surrealdb/langchain-core';
+import { HybridRetriever } from '@surrealdb/langchain/retrievers';
 
-const spectronHits = await spectronClient.documents.query({
-	query: 'return window for unopened items?',
-	mode: 'hybrid_graph' satisfies SpectronQueryMode, // 'vector' | 'bm25' | 'hybrid' | 'hybrid_graph'
+const retriever = new HybridRetriever({
+	surreal,
+	embeddings,
+	tableName: 'documents',
+	seedK: 5,
 	k: 10,
-	threshold: 0.5,
-	rrfK: 60,
-	graphAlpha: 0.3,
-	graphEdges: ['knowledge_has_keyword', 'knowledge_relates_to'],
-	graphDepth: 2,
-	expandGraph: true,
-	filter: { mimeType: ['application/pdf'] },
+	filter: { topic: 'onboarding' },
 });
 ```
 
-#### Keywords
+> Graph expansion (`graphEdges`) is **not yet supported** and throws if set. The previous
+> implementation could not work — under `SELECT VALUE` the `AS` alias is discarded, so the
+> fan-out was always empty — and returning silently-empty results was worse than saying so.
+
+## Tools
+
+Tools are built with LangChain v1's `tool()` helper and return
+`content_and_artifact`: the model sees a compact digest, your code gets the real rows
+or `Document`s as `message.artifact`.
 
 ```ts
-await spectronClient.documents.keywords.list({ minDocumentCount: 2, sort: '-document_count', q: 'return' });
-await spectronClient.documents.keywords.get('RETURN POLICY');
-await spectronClient.documents.keywords.search({ query: 'refund policies', k: 10, threshold: 0.6 });
-await spectronClient.documents.keywords.forDocument(spectronDoc.id);
+import {
+	createQueryTool,
+	createRecordTool,
+	createTool,
+} from '@surrealdb/langchain/tools';
+
+// The agent writes the SurrealQL. Read-only by default.
+const query = createQueryTool({ surreal, maxRows: 50 });
+
+// The query is fixed; the agent only fills in typed parameters. Prefer this.
+const findUser = createRecordTool({
+	surreal,
+	name: 'find_user',
+	description: 'Find a user by name',
+	schema: z.object({ name: z.string() }),
+	surql: 'SELECT * FROM user WHERE name = $name',
+});
+
+// Your own handler, with the client pre-bound.
+const custom = createTool({ surreal, name, description, schema, handler });
 ```
 
-### Sessions
+> `readOnly` rejects statements that are not a single `SELECT`/`INFO`/`RETURN`, contain a
+> write, DDL or control keyword, or call `fn::`. Treat it as a guard-rail that catches
+> mistakes early, **not** as a security boundary — a regex cannot be one. Anything reachable
+> by an untrusted agent belongs behind a read-only SurrealDB user or record-level access.
 
-Let Spectron run the loop with the top-level `chat` endpoint:
+## Chat model persistence
+
+The recommended way to record LLM traffic is a callback handler: it leaves the model
+untouched, so tool calling, structured output, streaming and caching all keep working.
 
 ```ts
-const spectronReply = await spectronClient.chat('What do you know about me?', {
-	scopes: [['user:tobie']],
+import { SurrealDBChatCallbackHandler } from '@surrealdb/langchain/callbacks';
+
+const model = new ChatOpenAI({ model: 'gpt-4.1-mini' }).withConfig({
+	callbacks: [new SurrealDBChatCallbackHandler({ surreal, threadId: 'demo' })],
 });
 ```
 
-Or open a session and drive the turns yourself:
+`SurrealDBChatModel` wraps a delegate model instead, for callers who need a
+`BaseChatModel`-shaped object. It forwards `bindTools`, `withStructuredOutput` and the
+metadata that tracing, token counting and caching read. Persistence failures are reported
+through `onPersistError` rather than failing the call; set `strictPersistence: true` to
+make them fatal.
+
+## Record manager (the indexing API)
+
+Keeps a vector store in sync with a source, skipping unchanged documents and deleting
+removed ones.
 
 ```ts
-const spectronSession = await spectronClient.sessions.create({
-	scopes: [['user:tobie']],
+import { index } from '@langchain/core/indexing';
+import { SurrealDBRecordManager } from '@surrealdb/langchain/indexes';
+
+const recordManager = await SurrealDBRecordManager.initialize({
+	surreal,
+	namespace: 'handbook',
 });
 
-const spectronContext = await spectronSession.context({ query: "What is Tobie's role?" });
-const llmReply = await myLLM.chat({ system: spectronContext.context, user: userMessage });
-
-await spectronSession.turns();
-await spectronSession.close();
+await index({
+	docsSource: docs,
+	recordManager,
+	vectorStore,
+	options: { cleanup: 'incremental', sourceIdKey: 'source' },
+});
 ```
 
-### One-shot retrieval
+Timestamps come from the server (in microseconds), so concurrent indexers agree on
+ordering and two runs in the same millisecond do not collide.
+
+## LLM cache
 
 ```ts
-await spectronClient.recall('What role does Christian have?', { k: 10 });
-await spectronClient.context('brief on tobie', { k: 10 });
+import { SurrealDBLLMCache } from '@surrealdb/langchain/caches';
+
+const model = new ChatOpenAI({
+	cache: new SurrealDBLLMCache({ surreal, ttlSeconds: 3600 }),
+});
 ```
 
-### State, profile, entities
+Prompts are **not** stored unless you pass `storePrompt: true` — they routinely contain
+user data and the cache does not need them.
+
+## Chat message history
 
 ```ts
-await spectronClient.state();
-await spectronClient.profile();
-await spectronClient.whoami();
+import { SurrealDBChatMessageHistory } from '@surrealdb/langchain/chat_history';
 
-await spectronClient.entities.list({ type: 'Person' });
-await spectronClient.entities.get('Person', 'christian_battaglia'); // → { entity, attributes, relations }
-await spectronClient.entities.history('Person', 'christian_battaglia', 'role');
-await spectronClient.entities.delete('Person', 'christian_battaglia'); // soft delete
+const history = new SurrealDBChatMessageHistory({ surreal, sessionId: 'user-42' });
+await history.addMessages([new HumanMessage('hi'), new AIMessage('hello')]);
 ```
 
-### Remember, reflect, forget, lifecycle, traces
+Content blocks, tool calls, ids and response metadata all survive the round trip.
+Appends run in a transaction, so concurrent writers to one session cannot collide on a
+sequence number. Two limits: a `RemoveMessage` (or any type outside
+`human | ai | system | function | tool | generic`) throws on read, and an
+`AIMessageChunk` comes back as an `AIMessage`. With LangGraph, prefer `SurrealDBSaver` —
+a checkpointer already persists the message list as graph state.
+
+## LangGraph: checkpointer, store and cache
 
 ```ts
-await spectronClient.remember('Christian was promoted to CTO', { scopes: [['user:christian']] });
-await spectronClient.reflect('patterns in customer complaints this month?', { persist: true });
-await spectronClient.forget('anything about my old job', { purge: false });
+import { ChatOpenAI } from '@langchain/openai';
+import {
+	SurrealDBNodeCache,
+	SurrealDBSaver,
+	SurrealDBStore,
+} from '@surrealdb/langgraph';
+import { createAgent } from 'langchain';
 
-await spectronClient.lifecycle.expire();
-await spectronClient.lifecycle.decay();
-
-await spectronClient.traces.list({ limit: 50 });
-await spectronClient.traces.get('decision_trace:abc123');
-await spectronClient.traces.stats();
+const agent = createAgent({
+	model: new ChatOpenAI({ model: 'gpt-4.1-mini' }),
+	tools: [],
+	checkpointer: new SurrealDBSaver({ surreal }),
+	store: new SurrealDBStore({ surreal }),
+});
 ```
 
-Higher-level operators (`consolidate`, `elaborate`, `fsck`, `inspect`, `audit`)
-and scope administration (`scopes`, `principals`, `keys`) are available on the
-client as well — see the [`@surrealdb/spectron`](https://www.npmjs.com/package/@surrealdb/spectron)
-docs.
+**`SurrealDBSaver`** implements the full `BaseCheckpointSaver` contract. `list()` supports
+cross-thread and cross-namespace listing (omit `thread_id` / `checkpoint_ns`), the
+`before` / `limit` / `filter` options, and populates `pendingWrites` so
+`getStateHistory()` reports pending tasks.
+
+**`SurrealDBStore`** implements `BaseStore`, with optional semantic search:
+
+```ts
+const store = new SurrealDBStore({
+	surreal,
+	index: { dims: 1536, embeddings, fields: ['text'] },
+});
+await store.start();
+await store.put(['users', 'alice'], 'pref', { text: 'prefers dark mode' });
+await store.search(['users', 'alice'], { query: 'ui preferences', limit: 5 });
+```
+
+Filters support `$eq $ne $gt $gte $lt $lte $in $nin $exists`. A `query` with no `index`
+configured warns once and returns unranked items; `strictSearch: true` makes it an error.
+
+**`SurrealDBNodeCache`** backs LangGraph v1's per-node `cachePolicy`:
+
+```ts
+const graph = builder
+	.addNode('expensive', fn, { cachePolicy: { ttl: 120 } })
+	.compile({ cache: new SurrealDBNodeCache({ surreal }) });
+```
+
+---
+
+## SurrealDB Agent Memory
+
+[Agent Memory](https://surrealdb.com/agent-memory) is SurrealDB's hosted agentic-memory
+service. These packages wrap the official
+[`@surrealdb/memory`](https://www.npmjs.com/package/@surrealdb/memory) client, which
+`@surrealdb/langchain-core` re-exports — see that package's README for the full client
+surface (documents, sessions, entities, lifecycle, traces, scopes, keys, pagination).
+
+### Configure
+
+```ts
+import { AgentMemory } from '@surrealdb/langchain-core';
+
+const memory = new AgentMemory({
+	context: 'acme-prod',
+	apiKey: process.env.AGENT_MEMORY_API_KEY!,
+	endpoint: process.env.AGENT_MEMORY_ENDPOINT!,
+});
+```
+
+Or let the adapters build one from the environment. `resolveAgentMemory` reads
+`AGENT_MEMORY_ENDPOINT`, `AGENT_MEMORY_API_KEY` and `AGENT_MEMORY_CONTEXT`, throws a
+clear error naming whichever is missing, and passes a pre-constructed client through
+untouched:
+
+```ts
+import { resolveAgentMemory } from '@surrealdb/langchain-core';
+
+const memory = resolveAgentMemory({}); // all three from the environment
+```
+
+`endpoint`, `apiKey` and `context` are all required — there is no implicit default host.
 
 ### Scope
 
-Scope is a DNF selector — an outer OR of inner AND groups, expressed as an
-array of string arrays (a plain string or string array is also accepted):
+Scope is a DNF selector: an outer OR of inner AND groups, written as an array of arrays
+of **slash-separated** `key/value` paths. A bare string or a flat array is also accepted.
 
 ```ts
-await spectronClient.sessions.create({ scopes: [['org:anneal']] });
-await spectronClient.sessions.create({
-	scopes: [['org:anneal', 'user:tobie', 'project:spectron']],
-});
+await memory.remember('...', { scopes: 'team/eng' });            // [['team/eng']]
+await memory.remember('...', { scopes: ['team/eng', 'org/acme'] }); // OR
+await memory.remember('...', { scopes: [['team/eng', 'org/acme']] }); // AND
 ```
 
-`normaliseScope` (from `@surrealdb/langchain-core/spectron`) converts loose
-scope input into the canonical `string[][]` form.
+`normaliseScope` (from `@surrealdb/langchain-core/memory`) converts loose input into the
+canonical `string[][]`.
+
+### Retriever and tools
+
+```ts
+import { AgentMemoryRetriever } from '@surrealdb/langchain/retrievers';
+import {
+	createAgentMemoryQueryTool,
+	createAgentMemoryReflectTool,
+} from '@surrealdb/langchain/tools';
+
+const retriever = new AgentMemoryRetriever({
+	client: memory,
+	mode: 'hybrid_graph',
+	k: 8,
+});
+
+const tools = [
+	createAgentMemoryQueryTool({ client: memory }),   // agent_memory_query
+	createAgentMemoryReflectTool({ client: memory }), // agent_memory_reflect
+];
+```
+
+Both tools return `content_and_artifact`: the query tool's artifact is the retrieved
+`Document[]`, the reflect tool's is the full reflection response. Either accepts a plain
+config object instead of a client, resolved via `resolveAgentMemory`.
+
+### LangGraph store
+
+`AgentMemoryStore` is a read-only `BaseStore` over Agent Memory.
+
+```ts
+import { AgentMemoryStore } from '@surrealdb/langgraph/memory_store';
+
+const store = new AgentMemoryStore({ client: memory });
+await store.get(['Person'], 'tobie');            // → entities.get
+await store.search([], { query: 'who is tobie?' }); // → recall
+```
+
+| Method | Backed by | Supported |
+| --- | --- | --- |
+| `get` | `entities.get` | yes |
+| `search` | `recall` | yes (requires `query`) |
+| `put` / `delete` | — | throws |
+| `listNamespaces` | — | throws |
+
+Recall has no namespace dimension, so `search` cannot simply honour a
+`namespacePrefix`. `namespaceMode` decides what happens when you pass one:
+
+| Mode | Behaviour |
+| --- | --- |
+| `'error'` (default) | Throws, rather than returning unscoped hits |
+| `'ignore'` | Searches everything and reports `namespace: []` |
+| `'lens'` | Maps the namespace onto a scope lens — a real server-side narrowing |
+
+Flat `filter` values become `key=value` label constraints; operator filters throw.
+`offset` is applied client-side over an over-fetch. Search hits carry no timestamps —
+`MemoryHitJson` has none — so `createdAt` / `updatedAt` are the epoch.
 
 ### Errors
 
 ```ts
 import {
-	SpectronNotFoundError,
-	SpectronRateLimitError,
+	AgentMemoryNotFoundError,
+	AgentMemoryRateLimitError,
 } from '@surrealdb/langchain-core';
-
-try {
-	await spectronClient.documents.get('doc:missing');
-} catch (err) {
-	if (err instanceof SpectronNotFoundError) {
-		console.log(err.status, err.detail);
-	} else if (err instanceof SpectronRateLimitError) {
-		console.log('retry after', err.retryAfter, 'seconds');
-	} else {
-		throw err;
-	}
-}
 ```
 
-| Class                       | HTTP        |
-| --------------------------- | ----------- |
-| `SpectronError`             | base        |
-| `SpectronAuthError`         | 401         |
-| `SpectronScopeError`        | 403         |
-| `SpectronNotFoundError`    | 404         |
-| `SpectronValidationError`   | 400, 422    |
-| `SpectronRateLimitError`    | 429 (with `retryAfter`) |
-| `SpectronServerError`       | 5xx         |
-| `SpectronConnectionError`   | network / timeout (status `0`) |
+| Class | HTTP |
+| --- | --- |
+| `AgentMemoryError` | base |
+| `AgentMemoryAuthError` | 401 |
+| `AgentMemoryScopeError` | 403 |
+| `AgentMemoryNotFoundError` | 404 |
+| `AgentMemoryValidationError` | 400, 422 |
+| `AgentMemoryRateLimitError` | 429 (with `retryAfter`) |
+| `AgentMemoryServerError` | 5xx |
+| `AgentMemoryConnectionError` | network / timeout (status `0`) |
+| `AgentMemoryCancelledError` | caller aborted via `signal` (status `0`) |
 
-Every error carries `status`, `title`, `detail`, `type`, `instance`, and
-`extensions` parsed from an RFC 7807 problem body when one is present.
+Every error carries `status`, `title`, `detail`, `type`, `instance` and `extensions`
+parsed from an RFC 7807 problem body when present.
 
-### Retries and timeouts
+> `client.onBehalfOf(principalId)` still sends the `X-Spectron-On-Behalf-Of` header —
+> that name is fixed upstream, so proxy or WAF rules keyed on it are unaffected by the
+> rebrand.
 
-- `GET` retries on connection errors and 5xx: 250 ms, 500 ms, 1 s, up to
-  `maxRetries` (default `3`).
-- Writes never retry. Handle failure yourself.
-- Default timeout is 30 s. Override with `timeout` on the constructor, or per
-  call by passing your own `AbortSignal` through the underlying transport.
+---
 
-### LangChain integrations
+## Migrating from 0.1.x
 
-`SpectronRetriever` translates `documents.query` hits into LangChain
-`Document`s, with chunk text as `pageContent` and document, chunk, score and
-graph metadata in `metadata`:
+0.2.0 is a clean break: there are no deprecated aliases, and the old names are gone.
 
-```ts
-import { SpectronRetriever } from '@surrealdb/langchain/retrievers';
+### Renamed exports
 
-const spectronRetriever = new SpectronRetriever({
-	client: spectronClient,
-	mode: 'hybrid_graph',
-	k: 8,
-	filter: { mimeType: ['application/pdf'] },
-});
-const spectronDocs = await spectronRetriever.invoke('what is the return policy?');
-```
+| 0.1.x | 0.2.0 |
+| --- | --- |
+| `VectorStore` | `SurrealDBVectorStore` |
+| `ChatModel` | `SurrealDBChatModel` |
+| `Store` | `SurrealDBStore` |
+| `CheckpointSaver` | `SurrealDBSaver` |
+| `Spectron` | `AgentMemory` |
+| `SpectronError` and the other `Spectron*Error`s | `AgentMemoryError` / `AgentMemory*Error` |
+| `SpectronOptions` / `SpectronConfig` | `AgentMemoryOptions` / `AgentMemoryConfig` |
+| `SpectronMemoryCategory` | `AgentMemoryCategory` |
+| `resolveSpectron` / `SpectronClientConfig` | `resolveAgentMemory` / `AgentMemoryClientConfig` |
+| `SpectronRetriever` | `AgentMemoryRetriever` |
+| `SpectronQueryTool` / `SpectronReflectTool` (classes) | `createAgentMemoryQueryTool` / `createAgentMemoryReflectTool` (factories) |
+| `QueryTool` / `RecordTool` (classes) | `createQueryTool` / `createRecordTool` (factories) |
+| `SpectronStore` | `AgentMemoryStore` (constructor key `spectron:` → `client:`) |
 
-Two `StructuredTool`s wire Spectron into agents:
+### Renamed subpaths and environment
 
-```ts
-import { SpectronQueryTool, SpectronReflectTool } from '@surrealdb/langchain/tools';
+| 0.1.x | 0.2.0 |
+| --- | --- |
+| `@surrealdb/langchain-core/spectron` | `@surrealdb/langchain-core/memory` |
+| `@surrealdb/langgraph/spectron_store` | `@surrealdb/langgraph/memory_store` |
+| `SPECTRON_ENDPOINT` / `SPECTRON_API_KEY` / `SPECTRON_CONTEXT` | `AGENT_MEMORY_ENDPOINT` / `AGENT_MEMORY_API_KEY` / `AGENT_MEMORY_CONTEXT` |
+| tool names `spectron_query` / `spectron_reflect` | `agent_memory_query` / `agent_memory_reflect` |
 
-const spectronTools = [
-	new SpectronQueryTool({ client: spectronClient }),
-	new SpectronReflectTool({ client: spectronClient }),
-];
-```
+### Behaviour changes
 
-`SpectronQueryTool` accepts `{ query, k?, mode?, filter? }` and returns a
-compact JSON array of hits; `SpectronReflectTool` accepts `{ query, persist? }`
-and returns the reflection. Both also accept a plain config object (resolved
-via `resolveSpectron`, incl. `SPECTRON_*` env vars) instead of an instantiated
-client.
+- **LangChain v1 is required.** `@langchain/core` v0.3 is no longer supported; the two
+  adapter packages previously declared ranges that could not be satisfied together.
+- **Vector store ids round-trip.** `addDocuments` now returns the bare id part and
+  `delete({ ids })` accepts exactly that. In 0.1.x the two used different escapings and
+  neither matched what was stored, so `delete({ ids })` silently deleted nothing.
+- **Similarity, not distance.** `similaritySearchWithScore` returns a score where higher
+  is better. Pass `scoreMode: 'distance'` to keep the old numbers.
+- **`idField` is gone** from the vector store — SurrealDB's primary key is always `id`.
+- **`indexType: 'mtree'` is gone.** SurrealDB v3 removed MTREE; `DEFINE INDEX … MTREE`
+  is a parse error. Use `hnsw` (default) or `diskann`.
+- **`HybridRetriever` rejects `graphEdges`** — see the note above.
+- **`AgentMemoryStore.search` rejects a namespace prefix by default.** Set
+  `namespaceMode: 'ignore'` for the old (unscoped) behaviour, or `'lens'` to scope for real.
+- **Filter keys are escaped as identifiers**, so a key containing SurrealQL no longer
+  reaches the query as an expression. A key like `tags[0]` is now a literal field name.
+- **Tools return `content_and_artifact`.** `tool.invoke(args)` still gives a string;
+  invoke with a tool call to get a `ToolMessage` whose `artifact` holds the rows.
+- **`lc_namespace` changed** for the memory retriever, so a runnable serialized under the
+  old namespace will not deserialize.
+- **`zod` is now a peer dependency** (`^3.25.76 || ^4`).
 
-### LangGraph store
-
-`SpectronStore` is a `BaseStore` adapter. Read paths delegate to Spectron;
-writes are not supported (Spectron writes flow through sessions and
-reflections, not raw key/value):
-
-```ts
-import { SpectronStore } from '@surrealdb/langgraph/spectron_store';
-
-const spectronStore = new SpectronStore({ spectron: spectronClient });
-await spectronStore.get(['Person'], 'tobie');                                  // → entities.get
-await spectronStore.search(['Person'], { query: 'who is tobie?', limit: 5 });  // → Spectron.recall
-```
-
-| Method            | Backed by              | Supported              |
-| ----------------- | ---------------------- | ---------------------- |
-| `get`             | `entities.get`         | yes                    |
-| `search`          | `Spectron.recall`      | yes (requires `query`) |
-| `put`             | n/a                    | throws                 |
-| `delete`          | n/a                    | throws                 |
-| `listNamespaces`  | n/a                    | throws                 |
-
-The LangGraph `namespace: string[]` is flattened into Spectron's entity
-`type` with `"/"` by default; override with the `namespaceSeparator` arg.
+---
 
 ## Local development
 
 ```bash
 bun install
 docker compose up -d            # SurrealDB v3 on :8000
+bun run build
 bun run typecheck
+bun run typecheck:examples
 bun run test
 bun run test:integration
 ```

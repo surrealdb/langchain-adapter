@@ -1,6 +1,6 @@
-import { Store } from '@surrealdb/langgraph';
+import { SurrealDBStore } from '@surrealdb/langgraph';
 
-const store = new Store({
+const store = new SurrealDBStore({
 	surreal: {
 		url: process.env.SURREALDB_URL ?? 'ws://localhost:8000',
 		username: process.env.SURREALDB_USER ?? 'root',

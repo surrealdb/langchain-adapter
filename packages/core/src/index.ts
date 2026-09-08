@@ -1,24 +1,27 @@
 export type {
-	DocumentStatus as SpectronDocumentStatus,
-	MemoryCategory as SpectronMemoryCategory,
-	QueryMode as SpectronQueryMode,
-	SpectronOptions,
-	SpectronOptions as SpectronConfig,
-	TurnRole as SpectronTurnRole,
-} from '@surrealdb/spectron';
+	AgentMemoryOptions,
+	AgentMemoryOptions as AgentMemoryConfig,
+	DocumentStatus as AgentMemoryDocumentStatus,
+	MemoryCategory as AgentMemoryCategory,
+	QueryMode as AgentMemoryQueryMode,
+	TurnRole as AgentMemoryTurnRole,
+} from '@surrealdb/memory';
 export {
-	AuthError as SpectronAuthError,
-	ConnectionError as SpectronConnectionError,
-	NotFoundError as SpectronNotFoundError,
-	RateLimitError as SpectronRateLimitError,
-	ScopeError as SpectronScopeError,
-	ServerError as SpectronServerError,
-	Spectron,
-	SpectronError,
-	ValidationError as SpectronValidationError,
-} from '@surrealdb/spectron';
+	AgentMemory,
+	AgentMemoryError,
+	AuthError as AgentMemoryAuthError,
+	CancelledError as AgentMemoryCancelledError,
+	ConnectionError as AgentMemoryConnectionError,
+	NotFoundError as AgentMemoryNotFoundError,
+	RateLimitError as AgentMemoryRateLimitError,
+	ScopeError as AgentMemoryScopeError,
+	ServerError as AgentMemoryServerError,
+	ValidationError as AgentMemoryValidationError,
+} from '@surrealdb/memory';
+export { toBytes } from './bytes.js';
 export {
 	RecordId,
+	resolveClient,
 	SurrealDBClient,
 	type SurrealTransaction,
 } from './client.js';
@@ -36,7 +39,20 @@ export {
 	translateFilter,
 } from './filter.js';
 export {
+	escapeIdent,
+	isRoundTrippableId,
+	recordIdToString,
+	toRecordId,
+} from './record.js';
+export {
+	explicitDistance,
+	knnPredicate,
+	type VectorQueryOptions,
+} from './vector_query.js';
+export {
+	assertCount,
 	assertIdent,
+	compactRow,
 	type DefineVectorIndexOptions,
 	type DistanceStrategy,
 	defineTable,
@@ -44,6 +60,6 @@ export {
 	type VectorIndexType,
 } from './schema.js';
 export {
-	resolveSpectron,
-	type SpectronClientConfig,
-} from './spectron_helpers.js';
+	type AgentMemoryClientConfig,
+	resolveAgentMemory,
+} from './memory_helpers.js';

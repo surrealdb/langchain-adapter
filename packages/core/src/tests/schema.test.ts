@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { assertIdent, defineTable, defineVectorIndex } from '../schema.js';
+import {
+	assertCount,
+	assertIdent,
+	defineTable,
+	defineVectorIndex,
+} from '../schema.js';
 
 describe('assertIdent', () => {
 	it('accepts snake_case identifiers', () => {
@@ -46,17 +51,34 @@ describe('defineVectorIndex', () => {
 		expect(ddl).toContain('EFC 200');
 	});
 
-	it('emits MTREE DDL when type is mtree', () => {
+	it('builds a DISKANN index', () => {
 		const ddl = defineVectorIndex({
 			tableName: 'docs',
-			indexName: 'docs_emb_idx',
+			indexName: 'idx',
 			field: 'emb',
 			dimensions: 64,
 			distance: 'euclidean',
-			type: 'mtree',
+			type: 'diskann',
 		});
-		expect(ddl).toContain('MTREE DIMENSION 64');
+		expect(ddl).toContain('DISKANN DIMENSION 64');
 		expect(ddl).toContain('DIST EUCLIDEAN');
+	});
+
+	it('never emits MTREE, which SurrealDB v3 removed', () => {
+		// `DEFINE INDEX … MTREE` is a parse error on 3.2, so the option is
+		// gone rather than silently producing invalid DDL.
+		for (const type of ['hnsw', 'diskann', 'none'] as const) {
+			expect(
+				defineVectorIndex({
+					tableName: 'docs',
+					indexName: 'idx',
+					field: 'emb',
+					dimensions: 8,
+					distance: 'cosine',
+					type,
+				}),
+			).not.toContain('MTREE');
+		}
 	});
 
 	it('returns empty string when type is none', () => {
@@ -70,5 +92,25 @@ describe('defineVectorIndex', () => {
 				type: 'none',
 			}),
 		).toBe('');
+	});
+});
+
+describe('assertCount', () => {
+	it('accepts non-negative safe integers', () => {
+		expect(assertCount(0)).toBe(0);
+		expect(assertCount(10)).toBe(10);
+	});
+
+	it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53])(
+		'rejects %p',
+		(bad) => {
+			expect(() => assertCount(bad)).toThrow(/Invalid SurrealDB limit/);
+		},
+	);
+
+	it('names the role in the message', () => {
+		expect(() => assertCount(-1, 'offset')).toThrow(
+			/Invalid SurrealDB offset/,
+		);
 	});
 });

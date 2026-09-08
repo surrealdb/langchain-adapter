@@ -17,7 +17,8 @@
 		"format": "biome format --write .",
 		"check": "biome check --write .",
 		"clean": "rm -rf packages/*/dist examples/*/dist",
-		"validate:versions": "bun run scripts/validate-versions.ts"
+		"validate:versions": "bun run scripts/validate-versions.ts",
+		"typecheck:examples": "bun run build && tsc --noEmit -p tsconfig.examples.json"
 	},
 	"engines": {
 		"bun": ">=1.0.0",

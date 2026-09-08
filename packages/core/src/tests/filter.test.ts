@@ -64,3 +64,53 @@ describe('translateFilter', () => {
 		expect(r.bindings).toEqual({ meta0: 1 });
 	});
 });
+
+describe('translateFilter field escaping', () => {
+	it('leaves plain identifiers untouched', () => {
+		expect(translateFilter({ source: 'docs' }).expr).toBe('source = $f0');
+		expect(
+			translateFilter({ a_1: 1 }, { fieldPrefix: 'metadata' }).expr,
+		).toBe('metadata.a_1 = $f0');
+	});
+
+	it('keeps dotted paths as paths, escaping each segment', () => {
+		expect(translateFilter({ 'a.b.c': 1 }).expr).toBe('a.b.c = $f0');
+	});
+
+	it('renders an injected key as a field name, not an expression', () => {
+		// The key is caller-controlled and cannot be a bound parameter, so it
+		// must end up as an identifier that simply matches nothing.
+		const r = translateFilter({ 'x = 1 OR true': 1 });
+		expect(r.expr).toBe('⟨x = 1 OR true⟩ = $f0');
+		expect(r.expr).not.toMatch(/\bOR\b\s+true\s*=/);
+	});
+
+	it('neutralises a statement-terminator key', () => {
+		const r = translateFilter(
+			{ 'a; REMOVE TABLE docs': 1 },
+			{ fieldPrefix: 'metadata' },
+		);
+		expect(r.expr).toBe('metadata.⟨a; REMOVE TABLE docs⟩ = $f0');
+	});
+
+	it('escapes the field for operator forms too', () => {
+		const r = translateFilter({ 'bad key': { $gte: 3 } });
+		expect(r.expr).toBe('⟨bad key⟩ >= $f0');
+	});
+
+	it('escapes the field on $in, $nin and $exists', () => {
+		expect(translateFilter({ 'b k': { $in: [1] } }).expr).toBe(
+			'⟨b k⟩ INSIDE $f0',
+		);
+		expect(translateFilter({ 'b k': { $nin: [1] } }).expr).toBe(
+			'⟨b k⟩ NOT INSIDE $f0',
+		);
+		expect(translateFilter({ 'b k': { $exists: true } }).expr).toBe(
+			'⟨b k⟩ IS NOT NONE',
+		);
+	});
+
+	it('escapes the field on a null (IS NONE) comparison', () => {
+		expect(translateFilter({ 'b k': null }).expr).toBe('⟨b k⟩ IS NONE');
+	});
+});

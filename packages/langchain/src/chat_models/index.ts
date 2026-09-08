@@ -1,1 +1,1 @@
-export { ChatModel, type ChatModelArgs } from './surrealdb.js';
+export { SurrealDBChatModel, type SurrealDBChatModelArgs } from './surrealdb.js';

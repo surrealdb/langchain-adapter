@@ -3,6 +3,6 @@ export {
 	type HybridRetrieverArgs,
 } from './hybrid.js';
 export {
-	SpectronRetriever,
-	type SpectronRetrieverArgs,
-} from './spectron.js';
+	AgentMemoryRetriever,
+	type AgentMemoryRetrieverArgs,
+} from './memory.js';

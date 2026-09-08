@@ -11,20 +11,26 @@ import {
 	WRITES_IDX_MAP,
 } from '@langchain/langgraph-checkpoint';
 import {
+	assertCount,
+	assertIdent,
 	defineTable,
 	SurrealDBClient,
 	type SurrealDBStoreConfig,
+	toBytes,
+	translateFilter,
 } from '@surrealdb/langchain-core';
 
 const CHECKPOINTS_TABLE = 'langgraph_checkpoints';
 const WRITES_TABLE = 'langgraph_checkpoint_writes';
 const SUPPORTED_CHECKPOINT_VERSION = 4;
 
-export interface CheckpointSaverArgs {
+export interface SurrealDBSaverArgs {
 	surreal: SurrealDBClient | SurrealDBStoreConfig;
 	serde?: SerializerProtocol;
 	checkpointsTable?: string;
 	writesTable?: string;
+	/** Skip table/index creation (assume an external migration owns it). */
+	skipInitSchema?: boolean;
 	skipVersionCheck?: boolean;
 }
 
@@ -59,18 +65,27 @@ interface CheckpointWriteRow {
  * the LangGraph serde protocol (defaults to `JsonPlusSerializer`) and
  * stored as native `bytes`.
  */
-export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
+export class SurrealDBSaver extends BaseLangGraphCheckpointSaver {
 	readonly client: SurrealDBClient;
 	readonly checkpointsTable: string;
 	readonly writesTable: string;
+	private readonly skipInitSchema: boolean;
 	private readonly skipVersionCheck: boolean;
 	private readonly ownsClient: boolean;
 	private setupDone = false;
 
-	constructor(args: CheckpointSaverArgs) {
+	constructor(args: SurrealDBSaverArgs) {
 		super(args.serde);
-		this.checkpointsTable = args.checkpointsTable ?? CHECKPOINTS_TABLE;
-		this.writesTable = args.writesTable ?? WRITES_TABLE;
+		// Both reach raw `DEFINE INDEX` DDL, which cannot bind parameters.
+		this.checkpointsTable = assertIdent(
+			args.checkpointsTable ?? CHECKPOINTS_TABLE,
+			'checkpoints table',
+		);
+		this.writesTable = assertIdent(
+			args.writesTable ?? WRITES_TABLE,
+			'writes table',
+		);
+		this.skipInitSchema = args.skipInitSchema ?? false;
 		this.skipVersionCheck = args.skipVersionCheck ?? false;
 
 		if (args.surreal instanceof SurrealDBClient) {
@@ -94,52 +109,54 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 			await this.client.assertServerVersion();
 		}
 
-		await this.client.execute(
-			defineTable(this.checkpointsTable, [
-				{ name: 'thread_id', type: 'TYPE string' },
-				{
-					name: 'checkpoint_ns',
-					type: "TYPE string DEFAULT ''",
-				},
-				{ name: 'checkpoint_id', type: 'TYPE string' },
-				{ name: 'parent_id', type: 'TYPE option<string>' },
-				{ name: 'type', type: 'TYPE string' },
-				{ name: 'checkpoint', type: 'TYPE bytes' },
-				{ name: 'metadata', type: 'TYPE object FLEXIBLE DEFAULT {}' },
-				{
-					name: 'created_at',
-					type: 'TYPE datetime DEFAULT time::now()',
-				},
-			]),
-		);
-		await this.client.execute(
-			`DEFINE INDEX IF NOT EXISTS ${this.checkpointsTable}_pk ON ${this.checkpointsTable} ` +
-				`FIELDS thread_id, checkpoint_ns, checkpoint_id UNIQUE;`,
-		);
-		await this.client.execute(
-			`DEFINE INDEX IF NOT EXISTS ${this.checkpointsTable}_thread ON ${this.checkpointsTable} ` +
-				`FIELDS thread_id, checkpoint_ns, created_at;`,
-		);
+		if (!this.skipInitSchema) {
+			await this.client.execute(
+				defineTable(this.checkpointsTable, [
+					{ name: 'thread_id', type: 'TYPE string' },
+					{
+						name: 'checkpoint_ns',
+						type: "TYPE string DEFAULT ''",
+					},
+					{ name: 'checkpoint_id', type: 'TYPE string' },
+					{ name: 'parent_id', type: 'TYPE option<string>' },
+					{ name: 'type', type: 'TYPE string' },
+					{ name: 'checkpoint', type: 'TYPE bytes' },
+					{ name: 'metadata', type: 'TYPE object FLEXIBLE DEFAULT {}' },
+					{
+						name: 'created_at',
+						type: 'TYPE datetime DEFAULT time::now()',
+					},
+				]),
+			);
+			await this.client.execute(
+				`DEFINE INDEX IF NOT EXISTS ${this.checkpointsTable}_pk ON ${this.checkpointsTable} ` +
+					`FIELDS thread_id, checkpoint_ns, checkpoint_id UNIQUE;`,
+			);
+			await this.client.execute(
+				`DEFINE INDEX IF NOT EXISTS ${this.checkpointsTable}_thread ON ${this.checkpointsTable} ` +
+					`FIELDS thread_id, checkpoint_ns, created_at;`,
+			);
 
-		await this.client.execute(
-			defineTable(this.writesTable, [
-				{ name: 'thread_id', type: 'TYPE string' },
-				{
-					name: 'checkpoint_ns',
-					type: "TYPE string DEFAULT ''",
-				},
-				{ name: 'checkpoint_id', type: 'TYPE string' },
-				{ name: 'task_id', type: 'TYPE string' },
-				{ name: 'idx', type: 'TYPE int' },
-				{ name: 'channel', type: 'TYPE string' },
-				{ name: 'type', type: 'TYPE string' },
-				{ name: 'value', type: 'TYPE bytes' },
-			]),
-		);
-		await this.client.execute(
-			`DEFINE INDEX IF NOT EXISTS ${this.writesTable}_pk ON ${this.writesTable} ` +
-				`FIELDS thread_id, checkpoint_ns, checkpoint_id, task_id, idx UNIQUE;`,
-		);
+			await this.client.execute(
+				defineTable(this.writesTable, [
+					{ name: 'thread_id', type: 'TYPE string' },
+					{
+						name: 'checkpoint_ns',
+						type: "TYPE string DEFAULT ''",
+					},
+					{ name: 'checkpoint_id', type: 'TYPE string' },
+					{ name: 'task_id', type: 'TYPE string' },
+					{ name: 'idx', type: 'TYPE int' },
+					{ name: 'channel', type: 'TYPE string' },
+					{ name: 'type', type: 'TYPE string' },
+					{ name: 'value', type: 'TYPE bytes' },
+				]),
+			);
+			await this.client.execute(
+				`DEFINE INDEX IF NOT EXISTS ${this.writesTable}_pk ON ${this.writesTable} ` +
+					`FIELDS thread_id, checkpoint_ns, checkpoint_id, task_id, idx UNIQUE;`,
+			);
+		}
 
 		this.setupDone = true;
 	}
@@ -191,12 +208,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 			typeof checkpoint.v === 'number' &&
 			checkpoint.v < SUPPORTED_CHECKPOINT_VERSION
 		) {
-			throw new Error(
-				`CheckpointSaver: refusing to load Checkpoint v${checkpoint.v} ` +
-					`(expected v${SUPPORTED_CHECKPOINT_VERSION}+). Migrate the checkpoint ` +
-					`upstream (e.g. via @langchain/langgraph-checkpoint-postgres) ` +
-					`before reading it back.`,
-			);
+			throw new Error(unsupportedVersionMessage(checkpoint.v));
 		}
 
 		const writes = await this.client.queryAll<CheckpointWriteRow>(
@@ -255,40 +267,69 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		options?: CheckpointListOptions,
 	): AsyncGenerator<CheckpointTuple> {
 		await this.setup();
-		const threadId = String(config.configurable?.thread_id ?? '');
-		const checkpointNs = String(config.configurable?.checkpoint_ns ?? '');
+		// `thread_id` is optional — omitting it lists across every thread,
+		// matching MemorySaver. `checkpoint_ns` is filtered only when the
+		// caller actually supplied one: coercing `undefined` to `''` pins
+		// every query to the root namespace.
+		const threadId = config.configurable?.thread_id as string | undefined;
+		const checkpointNs = config.configurable?.checkpoint_ns as
+			| string
+			| undefined;
+		const checkpointId = config.configurable?.checkpoint_id as
+			| string
+			| undefined;
 		const beforeId = options?.before?.configurable?.checkpoint_id as
 			| string
 			| undefined;
 		const limit = options?.limit;
 
-		const conditions: string[] = ['thread_id = $tid'];
+		const conditions: string[] = [];
 		const bindings: Record<string, unknown> = {
-			tid: threadId,
-			ns: checkpointNs,
+			table: this.checkpointsTable,
 		};
-		conditions.push('checkpoint_ns = $ns');
+		if (threadId !== undefined) {
+			conditions.push('thread_id = $tid');
+			bindings.tid = threadId;
+		}
+		if (checkpointNs !== undefined) {
+			conditions.push('checkpoint_ns = $ns');
+			bindings.ns = checkpointNs;
+		}
+		if (checkpointId !== undefined) {
+			conditions.push('checkpoint_id = $cid');
+			bindings.cid = checkpointId;
+		}
 		if (beforeId) {
 			conditions.push('checkpoint_id < $beforeId');
 			bindings.beforeId = beforeId;
 		}
 		if (options?.filter) {
-			let i = 0;
-			for (const [key, value] of Object.entries(options.filter)) {
-				const bind = `mfilter_${i++}`;
-				conditions.push(`metadata.${key} = $${bind}`);
-				bindings[bind] = value;
+			const { expr, bindings: filterBindings } = translateFilter(
+				options.filter,
+				{ fieldPrefix: 'metadata', bindPrefix: 'mfilter' },
+			);
+			if (expr) {
+				conditions.push(expr);
+				Object.assign(bindings, filterBindings);
 			}
 		}
-		const limitClause = typeof limit === 'number' ? ` LIMIT ${limit}` : '';
+		const whereClause =
+			conditions.length > 0 ? `WHERE ${conditions.join(' AND ')} ` : '';
+		const limitClause =
+			typeof limit === 'number' ? ` LIMIT ${assertCount(limit)}` : '';
 
-		bindings.table = this.checkpointsTable;
 		const rows = await this.client.queryAll<CheckpointRow>(
 			`SELECT * FROM type::table($table) ` +
-				`WHERE ${conditions.join(' AND ')} ` +
-				`ORDER BY checkpoint_id DESC${limitClause}`,
+				`${whereClause}` +
+				`ORDER BY thread_id ASC, checkpoint_ns ASC, checkpoint_id DESC` +
+				`${limitClause}`,
 			bindings,
 		);
+		if (rows.length === 0) return;
+
+		// One batched query for every checkpoint's writes, bucketed in JS.
+		// `getStateHistory()` reports no pending tasks without these.
+		const pendingByCheckpoint = await this.loadPendingWrites(rows);
 
 		for (const row of rows) {
 			const checkpoint = (await this.serde.loadsTyped(
@@ -299,29 +340,77 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 				typeof checkpoint.v === 'number' &&
 				checkpoint.v < SUPPORTED_CHECKPOINT_VERSION
 			) {
-				continue;
+				// Consistent with `getTuple`, which refuses rather than
+				// silently skipping — an unreadable checkpoint should not
+				// quietly vanish from a history listing.
+				throw new Error(unsupportedVersionMessage(checkpoint.v));
 			}
+			// Built from *this row's* thread/namespace, not the request's,
+			// which may have named neither.
+			const scope = {
+				thread_id: row.thread_id,
+				checkpoint_ns: row.checkpoint_ns,
+			};
 			yield {
 				config: {
 					configurable: {
-						thread_id: threadId,
-						checkpoint_ns: checkpointNs,
+						...scope,
 						checkpoint_id: row.checkpoint_id,
 					},
 				},
 				checkpoint,
 				metadata: row.metadata,
+				pendingWrites:
+					pendingByCheckpoint.get(
+						writeKey(
+							row.thread_id,
+							row.checkpoint_ns,
+							row.checkpoint_id,
+						),
+					) ?? [],
 				parentConfig: row.parent_id
 					? {
 							configurable: {
-								thread_id: threadId,
-								checkpoint_ns: checkpointNs,
+								...scope,
 								checkpoint_id: row.parent_id,
 							},
 						}
 					: undefined,
 			};
 		}
+	}
+
+	/** Pending writes for a page of checkpoints, in one round trip. */
+	private async loadPendingWrites(
+		rows: CheckpointRow[],
+	): Promise<Map<string, [string, string, unknown][]>> {
+		const writes = await this.client.queryAll<CheckpointWriteRow>(
+			`SELECT * FROM type::table($table) ` +
+				`WHERE thread_id INSIDE $tids AND checkpoint_ns INSIDE $nss ` +
+				`AND checkpoint_id INSIDE $cids ` +
+				`ORDER BY task_id, idx ASC`,
+			{
+				table: this.writesTable,
+				tids: [...new Set(rows.map((r) => r.thread_id))],
+				nss: [...new Set(rows.map((r) => r.checkpoint_ns))],
+				cids: [...new Set(rows.map((r) => r.checkpoint_id))],
+			},
+		);
+
+		const byCheckpoint = new Map<string, [string, string, unknown][]>();
+		for (const w of writes) {
+			const value = await this.serde.loadsTyped(w.type, toBytes(w.value));
+			const key = writeKey(w.thread_id, w.checkpoint_ns, w.checkpoint_id);
+			const bucket = byCheckpoint.get(key);
+			const entry: [string, string, unknown] = [
+				w.task_id,
+				w.channel,
+				value,
+			];
+			if (bucket) bucket.push(entry);
+			else byCheckpoint.set(key, [entry]);
+		}
+		return byCheckpoint;
 	}
 
 	override async put(
@@ -334,7 +423,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		const threadId = String(config.configurable?.thread_id ?? '');
 		if (!threadId) {
 			throw new Error(
-				'CheckpointSaver.put requires config.configurable.thread_id',
+				'SurrealDBSaver.put requires config.configurable.thread_id',
 			);
 		}
 		const checkpointNs = String(config.configurable?.checkpoint_ns ?? '');
@@ -385,7 +474,7 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 		const checkpointId = String(config.configurable?.checkpoint_id ?? '');
 		if (!threadId || !checkpointId) {
 			throw new Error(
-				'CheckpointSaver.putWrites requires thread_id and checkpoint_id in configurable',
+				'SurrealDBSaver.putWrites requires thread_id and checkpoint_id in configurable',
 			);
 		}
 
@@ -408,7 +497,19 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 
 		await this.client.tx(async (tx) => {
 			for (const row of rows) {
-				const isSpecial = row.channel in WRITES_IDX_MAP;
+				// Conflict policy, matching `MemorySaver.putWrites`:
+				//
+				//   - Regular channels (idx >= 0) are insert-if-absent. A task
+				//     replayed after a crash must not clobber the writes the
+				//     first attempt already recorded.
+				//   - The well-known channels (`__error__`, `__scheduled__`,
+				//     `__interrupt__`, `__resume__`, all mapped to negative
+				//     indices) overwrite, because their *latest* value is the
+				//     meaningful one — an interrupt resumed twice must not keep
+				//     the stale payload.
+				//
+				// This was previously inverted.
+				const overwrites = row.idx < 0;
 				const bindings = {
 					table: this.writesTable,
 					tid: row.thread_id,
@@ -418,8 +519,14 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 					idx: row.idx,
 					row,
 				};
-				if (isSpecial) {
-					// Insert-only-if-absent for the well-known channels.
+				if (overwrites) {
+					await tx
+						.query(
+							`UPSERT type::record($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
+							bindings,
+						)
+						.collect();
+				} else {
 					const existing = await tx
 						.query<[unknown[]]>(
 							`SELECT id FROM type::record($table, [$tid, $ns, $cid, $task, $idx])`,
@@ -431,13 +538,6 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 					await tx
 						.query(
 							`CREATE type::record($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
-							bindings,
-						)
-						.collect();
-				} else {
-					await tx
-						.query(
-							`UPSERT type::record($table, [$tid, $ns, $cid, $task, $idx]) CONTENT $row`,
 							bindings,
 						)
 						.collect();
@@ -465,29 +565,15 @@ export class CheckpointSaver extends BaseLangGraphCheckpointSaver {
 	}
 }
 
-function toBytes(value: unknown): Uint8Array {
-	if (value == null) {
-		throw new Error('toBytes: checkpoint payload is null/undefined');
-	}
+function writeKey(threadId: string, ns: string, checkpointId: string): string {
+	return JSON.stringify([threadId, ns, checkpointId]);
+}
 
-	if (value instanceof ArrayBuffer) return new Uint8Array(value);
-	if (value instanceof Uint8Array) return value;
-	if (ArrayBuffer.isView(value)) {
-		const view = value as ArrayBufferView;
-		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-	}
-	if (Array.isArray(value)) return new Uint8Array(value as number[]);
-	if (typeof value === 'string') return new TextEncoder().encode(value);
-	if (typeof value === 'object') {
-		const obj = value as Record<string, unknown>;
-		if (obj.type === 'Buffer' && Array.isArray(obj.data as unknown[])) {
-			return new Uint8Array(obj.data as number[]);
-		}
-		if (obj.buffer instanceof ArrayBuffer) {
-			return new Uint8Array(obj.buffer);
-		}
-	}
-	throw new Error(
-		`toBytes: unable to coerce checkpoint payload (got ${typeof value})`,
+function unsupportedVersionMessage(version: number): string {
+	return (
+		`SurrealDBSaver: refusing to load Checkpoint v${version} ` +
+		`(expected v${SUPPORTED_CHECKPOINT_VERSION}+). Migrate the checkpoint ` +
+		`upstream (e.g. via @langchain/langgraph-checkpoint-postgres) ` +
+		`before reading it back.`
 	);
 }

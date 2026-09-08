@@ -1,14 +1,14 @@
 import { Document } from '@langchain/core/documents';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { VectorStore } from '../vectorstores/surrealdb.js';
+import { SurrealDBVectorStore } from '../vectorstores/surrealdb.js';
 import { FakeEmbeddings, makeConfig } from './helpers.js';
 
 const cfg = makeConfig('vec');
 const dims = 16;
-let store: VectorStore;
+let store: SurrealDBVectorStore;
 
 beforeAll(async () => {
-	store = await VectorStore.initialize(new FakeEmbeddings(dims), {
+	store = await SurrealDBVectorStore.initialize(new FakeEmbeddings(dims), {
 		surreal: cfg,
 		dimensions: dims,
 		distanceStrategy: 'cosine',
@@ -20,7 +20,7 @@ afterAll(async () => {
 	await store?.close();
 });
 
-describe('VectorStore', () => {
+describe('SurrealDBVectorStore', () => {
 	it('round-trips addDocuments → similaritySearch', async () => {
 		await store.addDocuments([
 			new Document({

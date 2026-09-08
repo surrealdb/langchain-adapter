@@ -1,6 +1,4 @@
 export {
-	type DistanceStrategy,
-	type VectorIndexType,
-	VectorStore,
-	type VectorStoreArgs,
+	SurrealDBVectorStore,
+	type SurrealDBVectorStoreArgs,
 } from './surrealdb.js';

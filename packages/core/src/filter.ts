@@ -11,10 +11,17 @@
  *
  * A bare value is treated as `$eq`. Multiple top-level keys are AND-ed.
  *
+ * Field names are escaped per path segment, so a key containing anything
+ * outside `[A-Za-z0-9_]` becomes a bracketed SurrealDB identifier rather
+ * than an expression. One consequence worth knowing: a key like `tags[0]`
+ * is a literal field name, not an array index.
+ *
  * The resulting expression references the bindings by `$<prefix>0`,
  * `$<prefix>1`, … so multiple translated filters can be merged into one
  * query without name clashes.
  */
+
+import { escapeIdent } from 'surrealdb';
 
 const OPS = {
 	$eq: '=',
@@ -51,8 +58,18 @@ export function translateFilter(
 	const bindings: Record<string, unknown> = {};
 	let counter = 0;
 
-	const fieldRef = (field: string): string =>
-		fieldPrefix ? `${fieldPrefix}.${field}` : field;
+	// Filter keys are caller-controlled and land in the query *text* (a field
+	// reference cannot be a bound parameter). Escaping each dot-separated
+	// segment turns a hostile key into a field name that simply matches
+	// nothing, instead of an expression. Plain identifiers pass through
+	// untouched, so ordinary filters are unchanged.
+	const fieldRef = (field: string): string => {
+		const path = field
+			.split('.')
+			.map((segment) => escapeIdent(segment))
+			.join('.');
+		return fieldPrefix ? `${fieldPrefix}.${path}` : path;
+	};
 
 	const bind = (value: unknown): string => {
 		const name = `${bindPrefix}${counter++}`;

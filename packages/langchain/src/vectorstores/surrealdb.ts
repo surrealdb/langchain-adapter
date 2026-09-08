@@ -1,32 +1,49 @@
 import { Document, type DocumentInterface } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
-import { VectorStore as BaseVectorStore } from '@langchain/core/vectorstores';
+import { maximalMarginalRelevance } from '@langchain/core/utils/math';
 import {
+	VectorStore as BaseVectorStore,
+	type MaxMarginalRelevanceSearchOptions,
+} from '@langchain/core/vectorstores';
+import {
+	assertCount,
 	assertIdent,
 	type DistanceStrategy,
 	defineTable,
 	defineVectorIndex,
+	knnPredicate,
+	recordIdToString,
 	SurrealDBClient,
 	type SurrealDBStoreConfig,
+	toRecordId,
 	translateFilter,
 	type VectorIndexType,
 } from '@surrealdb/langchain-core';
 
 export type { DistanceStrategy, VectorIndexType };
 
-export interface VectorStoreArgs {
+export interface SurrealDBVectorStoreArgs {
 	/** Either an existing client/config OR a fresh URL/token config. */
 	surreal: SurrealDBClient | SurrealDBStoreConfig;
 	tableName?: string;
 	contentField?: string;
 	metadataField?: string;
 	vectorField?: string;
-	idField?: string;
 	dimensions: number;
 	distanceStrategy?: DistanceStrategy;
 	indexType?: VectorIndexType;
 	hnswOptions?: { m?: number; efc?: number };
-	mtreeOptions?: { capacity?: number };
+	diskannOptions?: { buildList?: number };
+	/** Search breadth for the graph index. Default 40. */
+	ef?: number;
+	/**
+	 * Direction of the number returned by
+	 * {@link SurrealDBVectorStore.similaritySearchWithScore}. Defaults to
+	 * `'similarity'` (higher is better), which is what the LangChain
+	 * ecosystem — `ScoreThresholdRetriever` included — assumes. Set
+	 * `'distance'` to restore the 0.1.x behaviour.
+	 */
+	scoreMode?: 'similarity' | 'distance';
 	/** Skip schema/index creation (assume an external migration owns it). */
 	skipInitSchema?: boolean;
 	/** Skip the SurrealDB v3 server version check. */
@@ -34,7 +51,7 @@ export interface VectorStoreArgs {
 }
 
 interface DocumentRow {
-	id: { tb: string; id: string } | string;
+	id: unknown;
 	[field: string]: unknown;
 }
 
@@ -44,11 +61,11 @@ interface DocumentRow {
  * Uses SurrealDB's native HNSW (or MTREE) vector index. Requires SurrealDB
  * server v3.x.
  *
- * Construct via {@link VectorStore.initialize} (or the static
+ * Construct via {@link SurrealDBVectorStore.initialize} (or the static
  * {@link fromTexts}/{@link fromDocuments} factories) — the synchronous
  * constructor cannot perform the connection or schema setup.
  */
-export class VectorStore extends BaseVectorStore {
+export class SurrealDBVectorStore extends BaseVectorStore {
 	declare FilterType: Record<string, any>;
 
 	override _vectorstoreType(): string {
@@ -60,18 +77,19 @@ export class VectorStore extends BaseVectorStore {
 	readonly contentField: string;
 	readonly metadataField: string;
 	readonly vectorField: string;
-	readonly idField: string;
 	readonly dimensions: number;
+	readonly scoreMode: 'similarity' | 'distance';
 	readonly distanceStrategy: DistanceStrategy;
 	readonly indexType: VectorIndexType;
 	readonly hnswOptions: { m?: number; efc?: number };
-	readonly mtreeOptions: { capacity?: number };
+	readonly diskannOptions: { buildList?: number };
+	readonly ef: number;
 	private readonly skipInitSchema: boolean;
 	private readonly skipVersionCheck: boolean;
 	private readonly ownsClient: boolean;
 	private initialised = false;
 
-	constructor(embeddings: EmbeddingsInterface, args: VectorStoreArgs) {
+	constructor(embeddings: EmbeddingsInterface, args: SurrealDBVectorStoreArgs) {
 		super(embeddings, args);
 
 		this.tableName = assertIdent(args.tableName ?? 'documents', 'table');
@@ -87,12 +105,13 @@ export class VectorStore extends BaseVectorStore {
 			args.vectorField ?? 'embedding',
 			'field',
 		);
-		this.idField = assertIdent(args.idField ?? 'id', 'field');
 		this.dimensions = args.dimensions;
+		this.scoreMode = args.scoreMode ?? 'similarity';
 		this.distanceStrategy = args.distanceStrategy ?? 'cosine';
 		this.indexType = args.indexType ?? 'hnsw';
 		this.hnswOptions = args.hnswOptions ?? {};
-		this.mtreeOptions = args.mtreeOptions ?? {};
+		this.diskannOptions = args.diskannOptions ?? {};
+		this.ef = args.ef ?? 40;
 		this.skipInitSchema = args.skipInitSchema ?? false;
 		this.skipVersionCheck = args.skipVersionCheck ?? false;
 
@@ -126,9 +145,9 @@ export class VectorStore extends BaseVectorStore {
 	/** Construct + initialise in one call. The recommended factory. */
 	static async initialize(
 		embeddings: EmbeddingsInterface,
-		args: VectorStoreArgs,
-	): Promise<VectorStore> {
-		const store = new VectorStore(embeddings, args);
+		args: SurrealDBVectorStoreArgs,
+	): Promise<SurrealDBVectorStore> {
+		const store = new SurrealDBVectorStore(embeddings, args);
 		await store.initialize();
 		return store;
 	}
@@ -137,8 +156,8 @@ export class VectorStore extends BaseVectorStore {
 		texts: string[],
 		metadatas: object[] | object,
 		embeddings: EmbeddingsInterface,
-		args: VectorStoreArgs,
-	): Promise<VectorStore> {
+		args: SurrealDBVectorStoreArgs,
+	): Promise<SurrealDBVectorStore> {
 		const docs = texts.map(
 			(pageContent, i) =>
 				new Document({
@@ -148,15 +167,15 @@ export class VectorStore extends BaseVectorStore {
 						: metadatas,
 				}),
 		);
-		return VectorStore.fromDocuments(docs, embeddings, args);
+		return SurrealDBVectorStore.fromDocuments(docs, embeddings, args);
 	}
 
 	static override async fromDocuments(
 		docs: DocumentInterface[],
 		embeddings: EmbeddingsInterface,
-		args: VectorStoreArgs,
-	): Promise<VectorStore> {
-		const store = await VectorStore.initialize(embeddings, args);
+		args: SurrealDBVectorStoreArgs,
+	): Promise<SurrealDBVectorStore> {
+		const store = await SurrealDBVectorStore.initialize(embeddings, args);
 		await store.addDocuments(docs);
 		return store;
 	}
@@ -173,7 +192,13 @@ export class VectorStore extends BaseVectorStore {
 		await this.initialize();
 		const texts = documents.map((d) => d.pageContent);
 		const vectors = await this.embeddings.embedDocuments(texts);
-		return this.addVectors(vectors, documents, options);
+		// v1 convention: a Document may carry its own id.
+		const ids =
+			options?.ids ??
+			(documents.every((d) => d.id) 
+				? documents.map((d) => d.id as string)
+				: undefined);
+		return this.addVectors(vectors, documents, { ...options, ids });
 	}
 
 	override async addVectors(
@@ -203,17 +228,106 @@ export class VectorStore extends BaseVectorStore {
 				[this.vectorField]: vectors[i],
 			};
 			if (ids?.[i]) {
-				record[this.idField] =
-					`${this.tableName}:${escapeId(ids[i] as string)}`;
+				// A real RecordId, not `\`${table}:${id}\``. The driver
+				// CBOR-encodes it, so the id part is never escaped or
+				// re-parsed; a string here lands in the id part verbatim and
+				// produces `table:⟨table:id⟩`.
+				record.id = toRecordId(this.tableName, ids[i] as string);
 			}
 			return record;
 		});
 
+		// `ON DUPLICATE KEY UPDATE`, because a plain INSERT errors on an
+		// existing primary key — which is exactly what re-indexing the same
+		// id does (LangChain's `index()` with `forceUpdate`).
 		const inserted = await this.client.queryAll<DocumentRow>(
-			`INSERT INTO ${this.tableName} $records`,
+			`INSERT INTO ${this.tableName} $records ` +
+				`ON DUPLICATE KEY UPDATE ` +
+				`${this.contentField} = $input.${this.contentField}, ` +
+				`${this.metadataField} = $input.${this.metadataField}, ` +
+				`${this.vectorField} = $input.${this.vectorField}`,
 			{ records },
 		);
-		return inserted.map((row) => stringifyRecordId(row[this.idField]));
+		return inserted.map((row) => recordIdToString(row.id));
+	}
+
+	/**
+	 * One SELECT behind both plain similarity search and MMR.
+	 *
+	 * `includeVectors` exists because MMR needs the embeddings to re-rank
+	 * while ordinary search does not — and shipping a full embedding back for
+	 * every hit is the single most expensive thing this query can do.
+	 */
+	private async _searchRows(
+		query: number[],
+		k: number,
+		filter: this['FilterType'] | undefined,
+		opts: { includeVectors: boolean },
+	): Promise<{ doc: DocumentInterface; score: number; vector?: number[] }[]> {
+		await this.initialize();
+
+		const { expr, bindings } = translateFilter(filter, {
+			fieldPrefix: this.metadataField,
+		});
+
+		// The KNN operator, so the HNSW/DISKANN index is actually used. An
+		// extra WHERE is pushed into the graph traversal rather than applied
+		// afterwards, so a filtered search still returns a full k.
+		const { predicate, distanceExpr } = knnPredicate({
+			field: this.vectorField,
+			k: assertCount(k, 'k'),
+			distance: this.distanceStrategy,
+			indexType: this.indexType,
+			ef: this.ef,
+		});
+
+		const projection = [
+			'id',
+			this.contentField,
+			this.metadataField,
+			...(opts.includeVectors ? [this.vectorField] : []),
+		].join(', ');
+
+		const conditions = expr ? `${predicate} AND ${expr}` : predicate;
+		const surql =
+			`SELECT ${projection}, ${distanceExpr} AS __distance__ ` +
+			`FROM ${this.tableName} ` +
+			`WHERE ${conditions} ` +
+			`ORDER BY __distance__ ASC`;
+
+		const rows = await this.client.queryAll<
+			DocumentRow & { __distance__: number }
+		>(surql, { vec: query, ...bindings });
+
+		return rows.map((row) => {
+			const doc = new Document({
+				pageContent: String(row[this.contentField] ?? ''),
+				metadata:
+					(row[this.metadataField] as Record<string, unknown>) ?? {},
+				id: recordIdToString(row.id),
+			});
+			return {
+				doc,
+				score: this.toScore(row.__distance__),
+				vector: opts.includeVectors
+					? (row[this.vectorField] as number[])
+					: undefined,
+			};
+		});
+	}
+
+	/**
+	 * Map a distance to the configured score direction.
+	 *
+	 * `1/(1+d)` for the unbounded metrics: monotonically decreasing in `d` and
+	 * bounded to `(0, 1]`, so "higher is better" holds without pretending the
+	 * result is a cosine similarity.
+	 */
+	private toScore(distance: number): number {
+		if (this.scoreMode === 'distance') return distance;
+		return this.distanceStrategy === 'cosine'
+			? 1 - distance
+			: 1 / (1 + distance);
 	}
 
 	override async similaritySearchVectorWithScore(
@@ -221,45 +335,41 @@ export class VectorStore extends BaseVectorStore {
 		k: number,
 		filter?: this['FilterType'],
 	): Promise<[DocumentInterface, number][]> {
-		await this.initialize();
-
-		const { expr, bindings } = translateFilter(filter, {
-			fieldPrefix: this.metadataField,
+		const rows = await this._searchRows(query, k, filter, {
+			includeVectors: false,
 		});
-		const distExpr = explicitDistance(
-			this.distanceStrategy,
-			this.vectorField,
+		return rows.map((r) => [r.doc, r.score]);
+	}
+
+	/**
+	 * Maximal marginal relevance: over-fetch `fetchK`, then re-rank for a
+	 * balance of relevance and diversity. Also what makes
+	 * `asRetriever({ searchType: 'mmr' })` work — the base class checks for
+	 * this method by name and throws without it.
+	 */
+	override async maxMarginalRelevanceSearch(
+		query: string,
+		options: MaxMarginalRelevanceSearchOptions<this['FilterType']>,
+	): Promise<DocumentInterface[]> {
+		const queryVector = await this.embeddings.embedQuery(query);
+		const fetchK = options.fetchK ?? 20;
+		const rows = await this._searchRows(
+			queryVector,
+			fetchK,
+			options.filter,
+			{ includeVectors: true },
 		);
+		if (rows.length === 0) return [];
 
-		// We deliberately do NOT use the `<|k|>` index operator here.
-		// SurrealDB v3 rejects it when combined with extra WHERE
-		// conditions ("KNN operators … mixed with unsupported KNN
-		// variants"). Brute-force `vector::distance::X(field, $vec) +
-		// ORDER BY` is always correct; HNSW still helps inserts and
-		// can be used later via a dedicated unfiltered fast path.
-		const whereClause = expr ? `WHERE ${expr} ` : '';
-		const surql =
-			`SELECT *, ${distExpr} AS __score__ ` +
-			`FROM ${this.tableName} ` +
-			`${whereClause}` +
-			`ORDER BY __score__ ASC LIMIT ${k}`;
-
-		const rows = await this.client.queryAll<
-			DocumentRow & { __score__: number }
-		>(surql, { vec: query, ...bindings });
-
-		return rows.map((row) => {
-			const content = String(row[this.contentField] ?? '');
-			const metadata =
-				(row[this.metadataField] as Record<string, unknown>) ?? {};
-			const id = stringifyRecordId(row[this.idField]);
-			const doc = new Document({
-				pageContent: content,
-				metadata,
-				id,
-			});
-			return [doc, row.__score__];
-		});
+		const picked = maximalMarginalRelevance(
+			queryVector,
+			rows.map((r) => r.vector ?? []),
+			options.lambda ?? 0.5,
+			options.k,
+		);
+		return picked
+			.map((i) => rows[i]?.doc)
+			.filter((d): d is DocumentInterface => d !== undefined);
 	}
 
 	override async delete(params: {
@@ -269,9 +379,19 @@ export class VectorStore extends BaseVectorStore {
 		await this.initialize();
 
 		if (params.ids && params.ids.length > 0) {
-			const recordIds = params.ids.map(
-				(id) => `${this.tableName}:${escapeId(id)}`,
-			);
+			// Bind RecordIds, not strings: `id` is a RecordId server-side, so
+			// comparing it against a string matches nothing and the delete
+			// silently succeeds having removed no rows.
+			const recordIds = params.ids.map((id) => {
+				if (id.includes(':')) {
+					throw new Error(
+						`SurrealDBVectorStore.delete: ${JSON.stringify(id)} is a ` +
+							`fully-qualified record id, which this store cannot ` +
+							`rebuild losslessly. Use delete({ filter }) instead.`,
+					);
+				}
+				return toRecordId(this.tableName, id);
+			});
 			await this.client.execute(
 				`DELETE FROM ${this.tableName} WHERE id INSIDE $ids`,
 				{ ids: recordIds },
@@ -291,7 +411,7 @@ export class VectorStore extends BaseVectorStore {
 		}
 
 		throw new Error(
-			'VectorStore.delete requires { ids } or { filter } — refusing to delete the entire table',
+			'SurrealDBVectorStore.delete requires { ids } or { filter } — refusing to delete the entire table',
 		);
 	}
 
@@ -314,43 +434,8 @@ export class VectorStore extends BaseVectorStore {
 			distance: this.distanceStrategy,
 			type: this.indexType,
 			hnsw: this.hnswOptions,
-			mtree: this.mtreeOptions,
+			diskann: this.diskannOptions,
 		});
 		if (indexDdl) await this.client.execute(indexDdl);
 	}
-}
-
-function explicitDistance(strategy: DistanceStrategy, field: string): string {
-	switch (strategy) {
-		case 'cosine':
-			return `(1.0 - vector::similarity::cosine(${field}, $vec))`;
-		case 'euclidean':
-			return `vector::distance::euclidean(${field}, $vec)`;
-		case 'manhattan':
-			return `vector::distance::manhattan(${field}, $vec)`;
-		case 'hamming':
-			return `vector::distance::hamming(${field}, $vec)`;
-	}
-}
-
-function escapeId(id: string): string {
-	if (/^[A-Za-z0-9_]+$/.test(id)) return id;
-	return `⧼${id.replace(/`/g, '\\`')}⧽`;
-}
-
-function stringifyRecordId(value: unknown): string {
-	if (value == null) return '';
-	if (typeof value === 'string') return value;
-	if (typeof value === 'object' && value !== null) {
-		const obj = value as {
-			tb?: string;
-			id?: unknown;
-			toString?: () => string;
-		};
-		if (obj.tb && obj.id !== undefined) {
-			return `${obj.tb}:${String(obj.id)}`;
-		}
-		if (typeof obj.toString === 'function') return obj.toString();
-	}
-	return String(value);
 }

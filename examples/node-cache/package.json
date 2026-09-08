@@ -1,5 +1,5 @@
 {
-	"name": "example-spectron-memory",
+	"name": "example-node-cache",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -7,8 +7,8 @@
 		"start": "bun run src/index.ts"
 	},
 	"dependencies": {
-		"@surrealdb/langchain": "workspace:*",
-		"@surrealdb/langchain-core": "workspace:*",
+		"@langchain/core": "^1.2.9",
+		"@langchain/langgraph": "^1.4.14",
 		"@surrealdb/langgraph": "workspace:*"
 	}
 }

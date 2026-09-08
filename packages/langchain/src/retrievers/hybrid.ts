@@ -6,10 +6,14 @@ import {
 	type BaseRetrieverInput,
 } from '@langchain/core/retrievers';
 import {
+	assertCount,
 	assertIdent,
+	knnPredicate,
+	recordIdToString,
 	SurrealDBClient,
 	type SurrealDBStoreConfig,
 	translateFilter,
+	type VectorIndexType,
 } from '@surrealdb/langchain-core';
 
 export interface HybridRetrieverArgs extends BaseRetrieverInput {
@@ -25,7 +29,17 @@ export interface HybridRetrieverArgs extends BaseRetrieverInput {
 	 * disable graph expansion (then the retriever behaves like a plain
 	 * vector retriever).
 	 */
+	/**
+	 * Graph edges to fan out over from the vector seeds.
+	 *
+	 * Not yet supported — see the note on {@link HybridRetriever}. Passing a
+	 * non-empty list throws rather than silently returning no neighbours.
+	 */
 	graphEdges?: string[];
+	/** Vector index defined on `vectorField`. Default `'hnsw'`. */
+	indexType?: VectorIndexType;
+	/** Search breadth for the graph index. Default 40. */
+	ef?: number;
 	/** Number of seed vector hits before graph expansion. Default: 5. */
 	seedK?: number;
 	/** Maximum number of documents returned. Default: 10. */
@@ -35,12 +49,15 @@ export interface HybridRetrieverArgs extends BaseRetrieverInput {
 }
 
 /**
- * Retriever that combines a vector kNN seed with a graph-walk over
- * SurrealDB edges, then re-ranks the union by vector distance.
+ * Retriever that seeds from a vector kNN search and re-ranks by distance.
  *
- * Useful when the document graph contains semantic neighbours that the
- * embedding alone wouldn't surface — e.g. follow-up answers, citations
- * or authored-by relationships.
+ * **Graph expansion is not yet supported.** The intent is to fan out over
+ * SurrealDB edges from the vector seeds and re-rank the union, surfacing
+ * semantic neighbours an embedding alone would miss. The previous
+ * implementation could not work — under `SELECT VALUE` the `AS` alias is
+ * discarded, so the fan-out was always empty — and it was never covered by a
+ * test. Rather than keep returning zero neighbours silently, `graphEdges`
+ * now throws; the feature will land with an integration test behind it.
  */
 export class HybridRetriever extends BaseLangChainRetriever {
 	override lc_namespace = ['langchain', 'retrievers', 'surrealdb'];
@@ -54,6 +71,8 @@ export class HybridRetriever extends BaseLangChainRetriever {
 	readonly graphEdges: string[];
 	readonly seedK: number;
 	readonly k: number;
+	readonly indexType: VectorIndexType;
+	readonly ef: number;
 	readonly filter: Record<string, unknown> | undefined;
 	private readonly ownsClient: boolean;
 	private connected = false;
@@ -77,8 +96,18 @@ export class HybridRetriever extends BaseLangChainRetriever {
 		this.graphEdges = (args.graphEdges ?? []).map((e) =>
 			assertIdent(e, 'edge'),
 		);
-		this.seedK = args.seedK ?? 5;
-		this.k = args.k ?? 10;
+		if (this.graphEdges.length > 0) {
+			throw new Error(
+				'HybridRetriever: graph expansion (`graphEdges`) is not yet ' +
+					'supported — the previous implementation always returned ' +
+					'zero neighbours. Omit `graphEdges` to use vector search ' +
+					'alone; graph expansion will return in a later release.',
+			);
+		}
+		this.seedK = assertCount(args.seedK ?? 5, 'seedK');
+		this.k = assertCount(args.k ?? 10, 'k');
+		this.indexType = args.indexType ?? 'hnsw';
+		this.ef = args.ef ?? 40;
 		this.filter = args.filter;
 
 		if (args.surreal instanceof SurrealDBClient) {
@@ -110,13 +139,25 @@ export class HybridRetriever extends BaseLangChainRetriever {
 		const { expr, bindings } = translateFilter(this.filter, {
 			fieldPrefix: this.metadataField,
 		});
-		const filterClause = expr ? ` AND ${expr}` : '';
+
+		// `<|k,EF|>` against the graph index, or `<|k,METRIC|>` brute force.
+		// The old single-argument `<|k|>` is rejected outright by SurrealDB
+		// v3 — "the `<|k|>` KNN operator (KTree / M-Tree) is no longer
+		// supported" — so this path could never have run against a v3 server.
+		const { predicate, distanceExpr } = knnPredicate({
+			field: this.vectorField,
+			k: this.seedK,
+			distance: 'cosine',
+			indexType: this.indexType,
+			ef: this.ef,
+		});
+		const conditions = expr ? `${predicate} AND ${expr}` : predicate;
 
 		const seedSurql =
 			`SELECT id, ${this.contentField}, ${this.metadataField}, ${this.vectorField}, ` +
-			`vector::distance::knn() AS __score__ ` +
+			`${distanceExpr} AS __score__ ` +
 			`FROM ${this.tableName} ` +
-			`WHERE ${this.vectorField} <|${this.seedK}|> $vec${filterClause}`;
+			`WHERE ${conditions}`;
 		const seeds = await this.client.queryAll<RawHit>(seedSurql, {
 			vec,
 			...bindings,
@@ -124,23 +165,7 @@ export class HybridRetriever extends BaseLangChainRetriever {
 
 		const fanout = new Map<string, RawHit>();
 		for (const seed of seeds) {
-			fanout.set(idKey(seed.id), seed);
-		}
-
-		for (const edge of this.graphEdges) {
-			if (seeds.length === 0) break;
-			const ids = seeds.map((s) => s.id);
-			const expandSurql =
-				`SELECT id, ${this.contentField}, ${this.metadataField}, ${this.vectorField} ` +
-				`FROM ${this.tableName} ` +
-				`WHERE id IN ((SELECT VALUE ->${edge}->${this.tableName} AS x ` +
-				`FROM $seedIds).x.flatten())`;
-			const neighbours = await this.client.queryAll<RawHit>(expandSurql, {
-				seedIds: ids,
-			});
-			for (const n of neighbours) {
-				if (!fanout.has(idKey(n.id))) fanout.set(idKey(n.id), n);
-			}
+			fanout.set(recordIdToString(seed.id), seed);
 		}
 
 		const ranked = [...fanout.values()].map((row) => ({
@@ -154,22 +179,17 @@ export class HybridRetriever extends BaseLangChainRetriever {
 				pageContent: String(row[this.contentField] ?? ''),
 				metadata:
 					(row[this.metadataField] as Record<string, unknown>) ?? {},
-				id: idKey(row.id),
+				id: recordIdToString(row.id),
 			});
 		});
 	}
 }
 
 interface RawHit {
-	id: { tb: string; id: string } | string;
+	id: unknown;
 	[field: string]: unknown;
 }
 
-function idKey(id: RawHit['id']): string {
-	if (typeof id === 'string') return id;
-	if (id && typeof id === 'object') return `${id.tb}:${id.id}`;
-	return String(id);
-}
 
 function cosineDistance(a: number[], b: number[]): number {
 	if (a.length !== b.length) return Number.POSITIVE_INFINITY;

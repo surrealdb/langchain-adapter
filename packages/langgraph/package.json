@@ -1,7 +1,7 @@
 {
 	"name": "@surrealdb/langgraph",
-	"version": "0.1.0",
-	"description": "SurrealDB checkpoint saver and store for LangGraph.js",
+	"version": "0.2.0",
+	"description": "SurrealDB checkpoint saver, store and node cache for LangGraph.js, plus a SurrealDB Agent Memory store",
 	"type": "module",
 	"main": "dist/index.cjs",
 	"module": "dist/index.js",
@@ -37,14 +37,24 @@
 				"default": "./dist/store.cjs"
 			}
 		},
-		"./spectron_store": {
+		"./memory_store": {
 			"import": {
-				"types": "./dist/spectron_store.d.ts",
-				"default": "./dist/spectron_store.js"
+				"types": "./dist/memory_store.d.ts",
+				"default": "./dist/memory_store.js"
 			},
 			"require": {
-				"types": "./dist/spectron_store.d.cts",
-				"default": "./dist/spectron_store.cjs"
+				"types": "./dist/memory_store.d.cts",
+				"default": "./dist/memory_store.cjs"
+			}
+		},
+		"./cache": {
+			"import": {
+				"types": "./dist/cache.d.ts",
+				"default": "./dist/cache.js"
+			},
+			"require": {
+				"types": "./dist/cache.d.cts",
+				"default": "./dist/cache.cjs"
 			}
 		},
 		"./package.json": "./package.json"
@@ -56,16 +66,16 @@
 	},
 	"dependencies": {
 		"@surrealdb/langchain-core": "workspace:*",
-		"surrealdb": "^2.0.3"
+		"surrealdb": "^2.0.8"
 	},
 	"peerDependencies": {
-		"@langchain/core": ">=0.3.0 <2.0.0",
-		"@langchain/langgraph-checkpoint": ">=0.0.20 <2.0.0"
+		"@langchain/core": "^1.2.9",
+		"@langchain/langgraph-checkpoint": "^1.1.5"
 	},
 	"devDependencies": {
-		"@langchain/core": "^1.1.45",
-		"@langchain/langgraph": "^1.0.0",
-		"@langchain/langgraph-checkpoint": "^1.0.2",
+		"@langchain/core": "^1.2.9",
+		"@langchain/langgraph": "^1.4.14",
+		"@langchain/langgraph-checkpoint": "^1.1.5",
 		"@types/node": "^22.0.0",
 		"tsup": "^8.5.1",
 		"typescript": "^5.9.3",

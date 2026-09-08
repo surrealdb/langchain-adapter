@@ -45,6 +45,8 @@ jobs:
         run: bun run build
       - name: Typecheck
         run: bun run typecheck
+      - name: Typecheck examples
+        run: bun run typecheck:examples
 
   test:
     name: Unit tests
@@ -80,7 +82,7 @@ jobs:
       - name: Start SurrealDB v3
         run: |
           docker run -d --name surrealdb -p 8000:8000 \
-            surrealdb/surrealdb:v3.0.5 \
+            surrealdb/surrealdb:v3.2.4 \
             start --user root --pass root memory
           for i in {1..30}; do
             if curl -sf http://localhost:8000/health; then

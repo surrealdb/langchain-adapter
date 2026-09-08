@@ -1,7 +1,7 @@
 {
 	"name": "@surrealdb/langchain-core",
-	"version": "0.1.0",
-	"description": "Shared SurrealDB connection, schema and query helpers plus a Spectron HTTP client for the SurrealDB LangChain.js / LangGraph.js adapters",
+	"version": "0.2.0",
+	"description": "Shared SurrealDB connection, schema and query helpers plus an Agent Memory HTTP client for the SurrealDB LangChain.js / LangGraph.js adapters",
 	"type": "module",
 	"main": "dist/index.cjs",
 	"module": "dist/index.js",
@@ -17,14 +17,14 @@
 				"default": "./dist/index.cjs"
 			}
 		},
-		"./spectron": {
+		"./memory": {
 			"import": {
-				"types": "./dist/spectron.d.ts",
-				"default": "./dist/spectron.js"
+				"types": "./dist/memory.d.ts",
+				"default": "./dist/memory.js"
 			},
 			"require": {
-				"types": "./dist/spectron.d.cts",
-				"default": "./dist/spectron.cjs"
+				"types": "./dist/memory.d.cts",
+				"default": "./dist/memory.cjs"
 			}
 		},
 		"./package.json": "./package.json"
@@ -35,8 +35,8 @@
 		"node": ">=22"
 	},
 	"dependencies": {
-		"@surrealdb/spectron": "^1.0.0-alpha.5",
-		"surrealdb": "^2.0.3"
+		"@surrealdb/memory": "^1.0.0-alpha.9",
+		"surrealdb": "^2.0.8"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

@@ -1,14 +1,15 @@
 export {
-	SpectronQueryTool,
-	type SpectronQueryToolArgs,
-	SpectronReflectTool,
-	type SpectronReflectToolArgs,
-} from './spectron.js';
+	createAgentMemoryQueryTool,
+	createAgentMemoryReflectTool,
+	type AgentMemoryQueryToolArgs,
+	type AgentMemoryReflectToolArgs,
+} from './memory.js';
 export {
 	type CreateToolArgs,
+	createQueryTool,
+	createRecordTool,
 	createTool,
-	QueryTool,
 	type QueryToolArgs,
-	RecordTool,
 	type RecordToolArgs,
+	type SurrealQLToolArtifact,
 } from './surql.js';

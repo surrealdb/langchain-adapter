@@ -13,23 +13,36 @@ import {
 	type SearchOperation,
 } from '@langchain/langgraph-checkpoint';
 import {
+	assertCount,
 	assertIdent,
 	type DistanceStrategy,
 	defineTable,
 	defineVectorIndex,
+	knnPredicate,
 	SurrealDBClient,
 	type SurrealDBStoreConfig,
+	translateFilter,
+	type VectorIndexType,
 } from '@surrealdb/langchain-core';
 
 const STORE_TABLE = 'langgraph_store';
 
-export interface StoreArgs {
+export interface SurrealDBStoreArgs {
 	surreal: SurrealDBClient | SurrealDBStoreConfig;
 	tableName?: string;
 	/** Optional vector search configuration. */
 	index?: IndexConfig & {
 		distanceStrategy?: DistanceStrategy;
 	};
+	/** Vector index to define on `embedding`. Default `'hnsw'`. */
+	indexType?: VectorIndexType;
+	/** Search breadth for the graph index. Default 40. */
+	ef?: number;
+	/**
+	 * Throw when `search({ query })` is called without an `index` configured,
+	 * instead of warning once and returning unranked rows. Default `false`.
+	 */
+	strictSearch?: boolean;
 	skipInitSchema?: boolean;
 	skipVersionCheck?: boolean;
 }
@@ -48,25 +61,34 @@ interface StoreRow {
  * SurrealDB-backed `BaseStore` for LangGraph.js long-term memory.
  *
  * Implements only `batch` — the base class wires `get`, `put`,
- * `search`, `delete` and `listNamespaces` on top of it. All operations
- * in a single `batch` call are executed inside one SurrealQL
- * transaction, preserving input order on the result side.
+ * `search`, `delete` and `listNamespaces` on top of it. Operations run
+ * sequentially as independent RPCs, preserving input order on the result
+ * side; they are deliberately *not* wrapped in one transaction, because
+ * `runPut` awaits the embedding provider and a transaction would hold a
+ * SurrealDB write lock open across that network call.
  */
-export class Store extends BaseLangGraphStore {
+export class SurrealDBStore extends BaseLangGraphStore {
 	readonly client: SurrealDBClient;
 	readonly tableName: string;
-	readonly index?: StoreArgs['index'];
+	readonly index?: SurrealDBStoreArgs['index'];
+	readonly indexType: VectorIndexType;
+	readonly ef: number;
+	readonly strictSearch: boolean;
+	private warnedUnindexed = false;
 	readonly distanceStrategy: DistanceStrategy;
 	private readonly skipInitSchema: boolean;
 	private readonly skipVersionCheck: boolean;
 	private readonly ownsClient: boolean;
 	private setupDone = false;
 
-	constructor(args: StoreArgs) {
+	constructor(args: SurrealDBStoreArgs) {
 		super();
 		this.tableName = assertIdent(args.tableName ?? STORE_TABLE, 'table');
 		this.index = args.index;
 		this.distanceStrategy = args.index?.distanceStrategy ?? 'cosine';
+		this.indexType = args.indexType ?? 'hnsw';
+		this.ef = args.ef ?? 40;
+		this.strictSearch = args.strictSearch ?? false;
 		this.skipInitSchema = args.skipInitSchema ?? false;
 		this.skipVersionCheck = args.skipVersionCheck ?? false;
 
@@ -126,7 +148,7 @@ export class Store extends BaseLangGraphStore {
 					field: 'embedding',
 					dimensions: this.index.dims,
 					distance: this.distanceStrategy,
-					type: 'hnsw',
+					type: this.indexType,
 				});
 				if (ddl) await this.client.execute(ddl);
 			}
@@ -138,8 +160,8 @@ export class Store extends BaseLangGraphStore {
 		operations: Op,
 	): Promise<OperationResults<Op>> {
 		await this.setup();
-		// Note: operations are executed sequentially as independent RPCs.
-		// Cross-operation atomicity is a v1.1 concern.
+		// Sequential, independent RPCs — see the class docblock for why this
+		// is not one transaction.
 		const results: unknown[] = new Array(operations.length);
 		for (let i = 0; i < operations.length; i++) {
 			const op = operations[i] as Operation;
@@ -216,61 +238,81 @@ export class Store extends BaseLangGraphStore {
 			bindings.nsPrefix = op.namespacePrefix;
 		}
 		if (op.filter) {
-			let i = 0;
-			for (const [key, value] of Object.entries(op.filter)) {
-				const bind = `f${i++}`;
-				if (
-					value &&
-					typeof value === 'object' &&
-					!Array.isArray(value)
-				) {
-					for (const [opName, opValue] of Object.entries(
-						value as Record<string, unknown>,
-					)) {
-						const opBind = `${bind}_${opName.replace(/^\$/, '')}`;
-						conditions.push(
-							`value.${key} ${cmpOp(opName)} $${opBind}`,
-						);
-						bindings[opBind] = opValue;
-					}
-				} else {
-					conditions.push(`value.${key} = $${bind}`);
-					bindings[bind] = value;
-				}
+			// Shared with the vector store and the checkpointer, so filter
+			// keys are escaped in one place — and `$in` / `$nin` / `$exists`
+			// come along for free, where the hand-rolled loop threw.
+			const { expr, bindings: filterBindings } = translateFilter(
+				op.filter,
+				{ fieldPrefix: 'value' },
+			);
+			if (expr) {
+				conditions.push(expr);
+				Object.assign(bindings, filterBindings);
 			}
 		}
 
 		if (op.query && this.index) {
-			const [vec] = await this.index.embeddings.embedDocuments([
-				op.query,
-			]);
-			const whereClause =
-				conditions.length > 0
-					? `WHERE ${conditions.join(' AND ')}`
-					: '';
-			// v3 has no vector::distance::cosine — derive distance from similarity.
+			// `embedQuery`, not `embedDocuments`: asymmetric embedding models
+			// encode queries differently from stored text.
+			const vec = await this.index.embeddings.embedQuery(op.query);
+			// The KNN operator applies its own k, and SurrealDB allows only
+			// one per query, so paging happens client-side over k+offset.
+			const { predicate, distanceExpr } = knnPredicate({
+				field: 'embedding',
+				k: assertCount(limit + offset, 'limit'),
+				distance: this.distanceStrategy,
+				indexType: this.indexType,
+				ef: this.ef,
+			});
+			const all = [predicate, ...conditions].join(' AND ');
 			const surql =
-				`SELECT *, (1.0 - vector::similarity::cosine(embedding, $vec)) AS __score__ ` +
+				`SELECT *, ${distanceExpr} AS __score__ ` +
 				`FROM type::table($table) ` +
-				`${whereClause} ` +
-				`ORDER BY __score__ ASC LIMIT ${limit} START ${offset}`;
+				`WHERE ${all} ` +
+				`ORDER BY __score__ ASC`;
 			const rows = await this.client.queryAll<
 				StoreRow & { __score__: number }
 			>(surql, { ...bindings, vec });
-			return rows.map((row) => ({
+			return rows.slice(offset, offset + limit).map((row) => ({
 				...rowToItem(row),
 				score: 1 - row.__score__,
 			}));
+		}
+
+		if (op.query && !this.index) {
+			// A semantic query with nothing to search semantically. Falling
+			// through to a created_at scan would return plausible-looking but
+			// unranked rows, so say so once rather than quietly misleading.
+			if (this.strictSearch) {
+				throw new Error(
+					'SurrealDBStore.search was given a `query` but no `index` ' +
+						'is configured, so there is nothing to search ' +
+						'semantically. Configure `index`, or drop the query.',
+				);
+			}
+			this.warnUnindexedQuery();
 		}
 
 		const where =
 			conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 		const rows = await this.client.queryAll<StoreRow>(
 			`SELECT * FROM type::table($table) ${where} ` +
-				`ORDER BY created_at DESC LIMIT ${limit} START ${offset}`,
+				`ORDER BY created_at DESC ` +
+				`LIMIT ${assertCount(limit)} START ${assertCount(offset, 'offset')}`,
 			bindings,
 		);
 		return rows.map((row) => ({ ...rowToItem(row) }));
+	}
+
+	private warnUnindexedQuery(): void {
+		if (this.warnedUnindexed) return;
+		this.warnedUnindexed = true;
+		console.warn(
+			'[SurrealDBStore] search() received a `query` but no `index` is ' +
+				'configured — returning recent items, unranked and without ' +
+				'scores. Configure `index` for semantic search, or set ' +
+				'`strictSearch: true` to make this an error.',
+		);
 	}
 
 	private async runListNamespaces(
@@ -287,19 +329,21 @@ export class Store extends BaseLangGraphStore {
 				conditions.every((c) => matchesCondition(c, ns)),
 			);
 		}
-		if (op.maxDepth !== undefined) {
-			const seen = new Set<string>();
-			const truncated: string[][] = [];
-			for (const ns of namespaces) {
-				const trimmed = ns.slice(0, op.maxDepth);
-				const key = trimmed.join(' ');
-				if (!seen.has(key)) {
-					seen.add(key);
-					truncated.push(trimmed);
-				}
+		// One row per *item*, so a namespace repeats once per key it holds.
+		// Dedupe always, not only when `maxDepth` trims, otherwise
+		// `listNamespaces({ prefix })` returns the same namespace N times.
+		const seen = new Set<string>();
+		const unique: string[][] = [];
+		for (const ns of namespaces) {
+			const trimmed =
+				op.maxDepth !== undefined ? ns.slice(0, op.maxDepth) : ns;
+			const key = JSON.stringify(trimmed);
+			if (!seen.has(key)) {
+				seen.add(key);
+				unique.push(trimmed);
 			}
-			namespaces = truncated;
 		}
+		namespaces = unique;
 		namespaces.sort((a, b) => a.join(':').localeCompare(b.join(':')));
 		const start = op.offset ?? 0;
 		const end = start + (op.limit ?? namespaces.length);
@@ -331,24 +375,6 @@ function matchesCondition(c: MatchCondition, key: string[]): boolean {
 	throw new Error(`Unsupported match type: ${matchType}`);
 }
 
-function cmpOp(op: string): string {
-	switch (op) {
-		case '$eq':
-			return '=';
-		case '$ne':
-			return '!=';
-		case '$gt':
-			return '>';
-		case '$gte':
-			return '>=';
-		case '$lt':
-			return '<';
-		case '$lte':
-			return '<=';
-		default:
-			throw new Error(`Unsupported filter operator: ${op}`);
-	}
-}
 
 function extractTexts(
 	value: Record<string, unknown>,

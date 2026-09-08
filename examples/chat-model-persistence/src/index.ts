@@ -1,8 +1,8 @@
 import { HumanMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
-import { ChatModel } from '@surrealdb/langchain';
+import { SurrealDBChatModel } from '@surrealdb/langchain';
 
-const persisting = new ChatModel({
+const persisting = new SurrealDBChatModel({
 	surreal: {
 		url: process.env.SURREALDB_URL ?? 'ws://localhost:8000',
 		username: process.env.SURREALDB_USER ?? 'root',
