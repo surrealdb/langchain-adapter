@@ -1,0 +1,43 @@
+# See https://github.com/surrealdb-dev/security for the promotion baseline.
+version: 2
+updates:
+  # GitHub Actions — MANDATORY for every repo.
+  # Keeps the SHA-pinned `uses:` lines in .github/workflows fresh.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 0   # security updates only
+    groups:
+      actions:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # npm — DELIBERATELY LEFT DISABLED.
+  #
+  # This repo uses Bun, and Dependabot cannot parse `bun.lock`. Enabling the
+  # npm ecosystem here does not work: the security-update job already fails
+  # on every run with
+  #
+  #     dependency_file_not_supported  { "dependency-name": "vitest" }
+  #     "Dependabot can't update vulnerable dependencies for projects without
+  #      a lockfile or pinned version requirement"
+  #
+  # Because Dependabot only reads the `package.json` manifests and cannot
+  # resolve the lockfile, it also sees none of the transitive tree — it
+  # reports 4 medium vitest alerts while OSV sees 9 vulnerabilities in the
+  # same tree, including a critical. See the PR that added this file.
+  #
+  # Uncomment once the repo either migrates to a Dependabot-supported
+  # lockfile (package-lock.json / pnpm-lock.yaml / yarn.lock) or adopts
+  # Renovate, which does support bun.lock.
+  #
+  # - package-ecosystem: "npm"
+  #   directory: "/"
+  #   schedule:
+  #     interval: "daily"
+  #   open-pull-requests-limit: 0
+  #   groups:
+  #     node:
+  #       applies-to: security-updates
+  #       patterns: ["*"]
